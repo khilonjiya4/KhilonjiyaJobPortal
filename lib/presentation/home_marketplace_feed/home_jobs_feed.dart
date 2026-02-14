@@ -7,7 +7,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/ui/khilonjiya_ui.dart';
 import '../../routes/app_routes.dart';
-
 import '../../services/job_seeker_home_service.dart';
 
 import '../common/widgets/pages/job_details_page.dart';
@@ -21,6 +20,8 @@ import 'jobs_by_salary_page.dart';
 
 import 'latest_jobs_page.dart';
 import 'jobs_nearby_page.dart';
+
+import 'top_companies_page.dart'; // ✅ ADDED
 
 import 'widgets/naukri_drawer.dart';
 
@@ -274,6 +275,15 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
     );
   }
 
+  void _openTopCompaniesPage() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const TopCompaniesPage(),
+      ),
+    );
+  }
+
   // ------------------------------------------------------------
   // EXPECTED SALARY FLOW (REAL PAGES)
   // ------------------------------------------------------------
@@ -332,7 +342,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
             ),
           ),
           const SizedBox(width: 10),
-
           Expanded(
             child: InkWell(
               onTap: _openSearchPage,
@@ -382,9 +391,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
               ),
             ),
           ),
-
           const SizedBox(width: 10),
-
           Container(
             width: 40,
             height: 40,
@@ -399,9 +406,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
               color: KhilonjiyaUI.primary,
             ),
           ),
-
           const SizedBox(width: 8),
-
           Stack(
             children: [
               Container(
@@ -493,6 +498,9 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
         ),
         const SizedBox(height: 18),
 
+        // ------------------------------------------------------------
+        // RECOMMENDED
+        // ------------------------------------------------------------
         SectionHeader(
           title: "Recommended jobs",
           ctaText: "View all",
@@ -520,6 +528,9 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
         const SizedBox(height: 18),
 
+        // ------------------------------------------------------------
+        // LATEST
+        // ------------------------------------------------------------
         SectionHeader(
           title: "Latest jobs",
           ctaText: "View all",
@@ -547,6 +558,9 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
         const SizedBox(height: 18),
 
+        // ------------------------------------------------------------
+        // NEARBY
+        // ------------------------------------------------------------
         SectionHeader(
           title: "Jobs nearby",
           ctaText: "View all",
@@ -574,10 +588,13 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
         const SizedBox(height: 18),
 
+        // ------------------------------------------------------------
+        // TOP COMPANIES
+        // ------------------------------------------------------------
         SectionHeader(
           title: "Top companies",
           ctaText: "View all",
-          onTap: () {},
+          onTap: _openTopCompaniesPage, // ✅ FIXED
         ),
         const SizedBox(height: 10),
 
@@ -590,7 +607,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
               crossAxisCount: 2,
               mainAxisSpacing: 12,
               crossAxisSpacing: 12,
-              childAspectRatio: 1.08,
+              childAspectRatio: 1.55, // ✅ FIXED (Axis style)
             ),
             itemBuilder: (_, __) => Container(
               decoration: KhilonjiyaUI.cardDecoration(radius: 16),
@@ -621,11 +638,13 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
               crossAxisCount: 2,
               mainAxisSpacing: 12,
               crossAxisSpacing: 12,
-              childAspectRatio: 1.08,
+              childAspectRatio: 1.55, // ✅ FIXED
             ),
             itemBuilder: (_, i) => CompanyCard(
               company: _topCompanies[i],
-              onTap: () {},
+              onTap: () {
+                // Later: open company details page
+              },
             ),
           ),
 
