@@ -1,5 +1,6 @@
 // File: lib/presentation/common/widgets/cards/job_card_widget.dart
 
+import 'dart:math';
 import 'package:flutter/material.dart';
 import '../../../../core/ui/khilonjiya_ui.dart';
 
@@ -86,11 +87,14 @@ class JobCardWidget extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ============================================================
-            // ROW 1: TITLE + SAVE
+            // ROW 1: LOGO + TITLE + SAVE
             // ============================================================
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                _CompanyLetterLogo(company: company, size: 52),
+                const SizedBox(width: 12),
+
                 Expanded(
                   child: Text(
                     title,
@@ -103,7 +107,9 @@ class JobCardWidget extends StatelessWidget {
                     ),
                   ),
                 ),
+
                 const SizedBox(width: 10),
+
                 InkWell(
                   onTap: onSaveToggle,
                   borderRadius: BorderRadius.circular(999),
@@ -126,14 +132,17 @@ class JobCardWidget extends StatelessWidget {
             // ============================================================
             // ROW 2: COMPANY
             // ============================================================
-            Text(
-              company,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: KhilonjiyaUI.sub.copyWith(
-                fontSize: 13.0,
-                fontWeight: FontWeight.w700,
-                color: const Color(0xFF334155),
+            Padding(
+              padding: const EdgeInsets.only(left: 64), // aligns with title start
+              child: Text(
+                company,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: KhilonjiyaUI.sub.copyWith(
+                  fontSize: 13.0,
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF334155),
+                ),
               ),
             ),
 
@@ -261,6 +270,8 @@ class JobCardWidget extends StatelessWidget {
       ),
       child: Text(
         text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: KhilonjiyaUI.sub.copyWith(
           fontSize: 12.0,
           fontWeight: FontWeight.w800,
@@ -363,7 +374,7 @@ class JobCardWidget extends StatelessWidget {
 
     String range;
     if (mn != null && mx != null) {
-      range = "$mn - $mx";
+      range = "$mn-$mx";
     } else if (mn != null) {
       range = "$mn+";
     } else {
@@ -437,5 +448,48 @@ class JobCardWidget extends StatelessWidget {
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     if (diff.inDays == 1) return '1d ago';
     return '${diff.inDays}d ago';
+  }
+}
+
+// ============================================================
+// COMPANY LOGO (FIRST LETTER ONLY FOR NOW)
+// ============================================================
+class _CompanyLetterLogo extends StatelessWidget {
+  final String company;
+  final double size;
+
+  const _CompanyLetterLogo({
+    required this.company,
+    this.size = 52,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final name = company.trim();
+    final letter = name.isNotEmpty ? name[0].toUpperCase() : 'C';
+
+    // deterministic random color per company
+    final color = Colors.primaries[
+        Random(name.isEmpty ? 1 : name.hashCode).nextInt(Colors.primaries.length)
+    ];
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: KhilonjiyaUI.border),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        letter,
+        style: TextStyle(
+          fontSize: size * 0.38,
+          fontWeight: FontWeight.w900,
+          color: color,
+        ),
+      ),
+    );
   }
 }
