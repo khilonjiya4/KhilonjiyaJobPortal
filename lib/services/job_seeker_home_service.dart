@@ -119,6 +119,27 @@ class JobSeekerHomeService {
   // RECOMMENDED JOBS (job_recommendations table)
   // ============================================================
 
+
+Future<List<Map<String, dynamic>>> fetchCompanyJobs({
+  required String companyId,
+  int limit = 50,
+}) async {
+  _ensureAuthenticatedSync();
+
+  final nowIso = DateTime.now().toIso8601String();
+
+  final res = await _db
+      .from('job_listings')
+      .select(_jobWithCompanySelect)
+      .eq('status', 'active')
+      .eq('company_id', companyId)
+      .gte('expires_at', nowIso)
+      .order('created_at', ascending: false)
+      .limit(limit);
+
+  return List<Map<String, dynamic>>.from(res);
+}
+
   Future<List<Map<String, dynamic>>> getRecommendedJobs({
     int limit = 40,
   }) async {
