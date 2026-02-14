@@ -1,6 +1,3 @@
-// File: lib/presentation/common/widgets/cards/company_card.dart
-
-import 'dart:math';
 import 'package:flutter/material.dart';
 import '../../../../core/ui/khilonjiya_ui.dart';
 
@@ -17,14 +14,15 @@ class CompanyCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = (company['name'] ?? 'Company').toString().trim();
-    final logoUrl = (company['logo_url'] ?? '').toString().trim();
+    final industry = (company['industry'] ?? '').toString().trim();
     final totalJobs = _toInt(company['total_jobs']);
 
     return InkWell(
       onTap: onTap,
       borderRadius: KhilonjiyaUI.r16,
       child: Container(
-        padding: const EdgeInsets.all(14),
+        margin: const EdgeInsets.only(bottom: 12), // ✅ matches job cards
+        padding: const EdgeInsets.all(16), // ✅ matches job cards
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: KhilonjiyaUI.r16,
@@ -32,37 +30,81 @@ class CompanyCard extends StatelessWidget {
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.04),
-              blurRadius: 16,
+              blurRadius: 18,
               offset: const Offset(0, 8),
             ),
           ],
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
+        child: Row(
           children: [
+            _CompanyLogo(name: name),
+            const SizedBox(width: 14),
+
             // ------------------------------------------------------------
-            // LOGO (CENTER)
+            // NAME + INDUSTRY
             // ------------------------------------------------------------
-            _CompanyLogoMinimal(
-              logoUrl: logoUrl,
-              name: name,
-              size: 58,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name.isEmpty ? "Company" : name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: KhilonjiyaUI.cardTitle.copyWith(
+                      fontSize: 15.0,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    industry.isEmpty ? "Type of business" : industry,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: KhilonjiyaUI.sub.copyWith(
+                      fontSize: 12.6,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF64748B),
+                    ),
+                  ),
+                ],
+              ),
             ),
 
-            const Spacer(),
+            const SizedBox(width: 12),
 
             // ------------------------------------------------------------
-            // JOBS COUNT (BOTTOM)
+            // JOB COUNT
             // ------------------------------------------------------------
-            Text(
-              totalJobs <= 0 ? "No jobs" : "$totalJobs jobs",
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: KhilonjiyaUI.body.copyWith(
-                fontSize: 13.0,
-                fontWeight: FontWeight.w900,
-                color: const Color(0xFF0F172A),
-              ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  totalJobs <= 0 ? "0" : "$totalJobs",
+                  style: KhilonjiyaUI.cardTitle.copyWith(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    color: const Color(0xFF0F172A),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  "jobs",
+                  style: KhilonjiyaUI.sub.copyWith(
+                    fontSize: 12.0,
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFF64748B),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(width: 6),
+
+            const Icon(
+              Icons.arrow_forward_rounded,
+              size: 20,
+              color: KhilonjiyaUI.muted,
             ),
           ],
         ),
@@ -78,69 +120,35 @@ class CompanyCard extends StatelessWidget {
   }
 }
 
-// ============================================================
-// MINIMAL LOGO WIDGET
-// - Uses real logo if available
-// - Otherwise first letter
-// - Clean, no extra UI
-// ============================================================
-class _CompanyLogoMinimal extends StatelessWidget {
-  final String logoUrl;
+// ------------------------------------------------------------
+// LOGO (LETTER FOR NOW)
+// ------------------------------------------------------------
+class _CompanyLogo extends StatelessWidget {
   final String name;
-  final double size;
 
-  const _CompanyLogoMinimal({
-    required this.logoUrl,
-    required this.name,
-    this.size = 56,
-  });
+  const _CompanyLogo({required this.name});
 
   @override
   Widget build(BuildContext context) {
-    final cleanName = name.trim();
-    final letter = cleanName.isNotEmpty ? cleanName[0].toUpperCase() : "C";
-
-    // deterministic color per company
-    final baseColor = Colors.primaries[
-        Random(cleanName.isEmpty ? 7 : cleanName.hashCode)
-            .nextInt(Colors.primaries.length)];
+    final letter = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : "C";
 
     return Container(
-      width: size,
-      height: size,
+      width: 54,
+      height: 54,
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: KhilonjiyaUI.border),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: logoUrl.isEmpty
-          ? Center(
-              child: Text(
-                letter,
-                style: TextStyle(
-                  fontSize: size * 0.40,
-                  fontWeight: FontWeight.w900,
-                  color: baseColor,
-                ),
-              ),
-            )
-          : Image.network(
-              logoUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) {
-                return Center(
-                  child: Text(
-                    letter,
-                    style: TextStyle(
-                      fontSize: size * 0.40,
-                      fontWeight: FontWeight.w900,
-                      color: baseColor,
-                    ),
-                  ),
-                );
-              },
-            ),
+      alignment: Alignment.center,
+      child: Text(
+        letter,
+        style: KhilonjiyaUI.h1.copyWith(
+          fontSize: 20,
+          fontWeight: FontWeight.w900,
+          color: const Color(0xFF334155),
+        ),
+      ),
     );
   }
 }
