@@ -1,5 +1,3 @@
-// File: lib/presentation/common/widgets/cards/company_card.dart
-
 import 'package:flutter/material.dart';
 import '../../../../core/ui/khilonjiya_ui.dart';
 
@@ -17,130 +15,129 @@ class CompanyCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final name = (company['name'] ?? 'Company').toString().trim();
     final logoUrl = (company['logo_url'] ?? '').toString().trim();
-
     final industry = (company['industry'] ?? '').toString().trim();
+    final isVerified = company['is_verified'] == true;
 
-    final rating = _toDouble(company['rating']);
-    final totalReviews = _toInt(company['total_reviews']);
+    final totalJobs = _toInt(company['total_jobs']);
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: KhilonjiyaUI.r16,
       child: Container(
         padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: KhilonjiyaUI.border),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 14,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
+        decoration: KhilonjiyaUI.cardDecoration(radius: 16),
         child: Column(
           children: [
-            // ------------------------------------------------------------
-            // LOGO (CENTER)
-            // ------------------------------------------------------------
-            _CompanyLogoSquare(
+            // ============================================================
+            // LOGO
+            // ============================================================
+            _CompanyLogo(
               logoUrl: logoUrl,
               name: name,
             ),
 
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
 
-            // ------------------------------------------------------------
-            // NAME (CENTER)
-            // ------------------------------------------------------------
-            Text(
-              name.isEmpty ? "Company" : name,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: KhilonjiyaUI.body.copyWith(
-                fontWeight: FontWeight.w900,
-                fontSize: 14.4,
-                color: const Color(0xFF0F172A),
-              ),
-            ),
-
-            const SizedBox(height: 10),
-
-            // ------------------------------------------------------------
-            // RATING ROW (CENTER)
-            // ------------------------------------------------------------
+            // ============================================================
+            // COMPANY NAME + VERIFIED
+            // ============================================================
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(
-                  Icons.star_rounded,
-                  size: 18,
-                  color: Color(0xFFF59E0B),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  rating <= 0 ? "New" : rating.toStringAsFixed(1),
-                  style: KhilonjiyaUI.body.copyWith(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 12.6,
-                    color: const Color(0xFF0F172A),
+                Flexible(
+                  child: Text(
+                    name.isEmpty ? "Company" : name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: KhilonjiyaUI.cardTitle.copyWith(
+                      fontSize: 15.0,
+                      fontWeight: FontWeight.w900,
+                      color: const Color(0xFF0F172A),
+                    ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  totalReviews <= 0 ? "0 reviews" : "$totalReviews reviews",
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: KhilonjiyaUI.sub.copyWith(
-                    fontSize: 12.2,
-                    fontWeight: FontWeight.w700,
-                    color: const Color(0xFF64748B),
+                if (isVerified) ...[
+                  const SizedBox(width: 6),
+                  const Icon(
+                    Icons.verified_rounded,
+                    size: 18,
+                    color: KhilonjiyaUI.primary,
                   ),
-                ),
+                ],
               ],
             ),
 
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
 
-            // ------------------------------------------------------------
-            // INDUSTRY TAG (CENTER)
-            // ------------------------------------------------------------
+            // ============================================================
+            // INDUSTRY TAG (OPTIONAL)
+            // ============================================================
             if (industry.isNotEmpty)
               Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
                   color: const Color(0xFFFFF7ED),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFFED7AA)),
+                  border: Border.all(
+                    color: const Color(0xFFFED7AA),
+                  ),
                 ),
                 child: Text(
                   industry,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: KhilonjiyaUI.sub.copyWith(
-                    fontSize: 12.2,
+                  style: KhilonjiyaUI.caption.copyWith(
+                    fontSize: 11.5,
                     fontWeight: FontWeight.w800,
-                    color: const Color(0xFFEA580C),
+                    color: const Color(0xFFB45309),
                   ),
                 ),
               )
             else
-              const SizedBox(height: 28),
+              const SizedBox(height: 26),
 
             const Spacer(),
 
-            // ------------------------------------------------------------
-            // VIEW JOBS (CENTER)
-            // ------------------------------------------------------------
+            // ============================================================
+            // JOBS COUNT
+            // ============================================================
             Text(
-              "View jobs",
-              style: KhilonjiyaUI.link.copyWith(
-                fontSize: 13.2,
-                fontWeight: FontWeight.w900,
+              totalJobs <= 0 ? "No active jobs" : "$totalJobs active jobs",
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: KhilonjiyaUI.sub.copyWith(
+                fontSize: 12.0,
+                fontWeight: FontWeight.w700,
+                color: const Color(0xFF64748B),
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            // ============================================================
+            // VIEW JOBS BUTTON (Axis style)
+            // ============================================================
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEFF6FF),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: const Color(0xFFDBEAFE),
+                ),
+              ),
+              child: Center(
+                child: Text(
+                  "View jobs",
+                  style: KhilonjiyaUI.link.copyWith(
+                    fontSize: 13.2,
+                    fontWeight: FontWeight.w900,
+                    color: KhilonjiyaUI.primary,
+                  ),
+                ),
               ),
             ),
           ],
@@ -149,29 +146,19 @@ class CompanyCard extends StatelessWidget {
     );
   }
 
-  // ------------------------------------------------------------
-  // HELPERS
-  // ------------------------------------------------------------
   int _toInt(dynamic v) {
     if (v == null) return 0;
     if (v is int) return v;
     if (v is double) return v.toInt();
     return int.tryParse(v.toString()) ?? 0;
   }
-
-  double _toDouble(dynamic v) {
-    if (v == null) return 0;
-    if (v is double) return v;
-    if (v is int) return v.toDouble();
-    return double.tryParse(v.toString()) ?? 0;
-  }
 }
 
-class _CompanyLogoSquare extends StatelessWidget {
+class _CompanyLogo extends StatelessWidget {
   final String logoUrl;
   final String name;
 
-  const _CompanyLogoSquare({
+  const _CompanyLogo({
     required this.logoUrl,
     required this.name,
   });
@@ -181,11 +168,11 @@ class _CompanyLogoSquare extends StatelessWidget {
     final letter = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : "C";
 
     return Container(
-      width: 56,
-      height: 56,
+      width: 62,
+      height: 62,
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: KhilonjiyaUI.border),
       ),
       clipBehavior: Clip.antiAlias,
@@ -202,7 +189,7 @@ class _CompanyLogoSquare extends StatelessWidget {
             )
           : Image.network(
               logoUrl,
-              fit: BoxFit.cover,
+              fit: BoxFit.contain,
               errorBuilder: (_, __, ___) {
                 return Center(
                   child: Text(
