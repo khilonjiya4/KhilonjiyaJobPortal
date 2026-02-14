@@ -1,5 +1,3 @@
-// File: lib/presentation/home_marketplace_feed/home_jobs_feed.dart
-
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -12,6 +10,9 @@ import '../../services/job_seeker_home_service.dart';
 import '../common/widgets/pages/job_details_page.dart';
 import '../common/widgets/cards/company_card.dart';
 
+import 'company_details_page.dart'; // ✅ ADDED
+import 'top_companies_page.dart'; // ✅ ADDED
+
 import 'recommended_jobs_page.dart';
 import 'job_search_page.dart';
 
@@ -20,8 +21,6 @@ import 'jobs_by_salary_page.dart';
 
 import 'latest_jobs_page.dart';
 import 'jobs_nearby_page.dart';
-
-import 'top_companies_page.dart'; // ✅ ADDED
 
 import 'widgets/naukri_drawer.dart';
 
@@ -146,7 +145,11 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   Future<void> _loadInitialData() async {
     if (_isDisposed) return;
 
-    setState(() => _isCheckingAuth = false);
+    // ✅ auth already checked in _initialize()
+    // Now we can stop showing loader
+    if (!_isDisposed) {
+      setState(() => _isCheckingAuth = false);
+    }
 
     try {
       // ------------------------------------------------------------
@@ -284,8 +287,19 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
     );
   }
 
+  void _openCompanyDetails(String companyId) {
+    if (companyId.trim().isEmpty) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CompanyDetailsPage(companyId: companyId),
+      ),
+    );
+  }
+
   // ------------------------------------------------------------
-  // EXPECTED SALARY FLOW (REAL PAGES)
+  // EXPECTED SALARY FLOW
   // ------------------------------------------------------------
   Future<void> _openExpectedSalaryEditPage() async {
     if (!mounted) return;
@@ -594,7 +608,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
         SectionHeader(
           title: "Top companies",
           ctaText: "View all",
-          onTap: _openTopCompaniesPage, // ✅ FIXED
+          onTap: _openTopCompaniesPage,
         ),
         const SizedBox(height: 10),
 
@@ -607,7 +621,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
               crossAxisCount: 2,
               mainAxisSpacing: 12,
               crossAxisSpacing: 12,
-              childAspectRatio: 1.55, // ✅ FIXED (Axis style)
+              childAspectRatio: 1.55,
             ),
             itemBuilder: (_, __) => Container(
               decoration: KhilonjiyaUI.cardDecoration(radius: 16),
@@ -638,14 +652,17 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
               crossAxisCount: 2,
               mainAxisSpacing: 12,
               crossAxisSpacing: 12,
-              childAspectRatio: 1.55, // ✅ FIXED
+              childAspectRatio: 1.55,
             ),
-            itemBuilder: (_, i) => CompanyCard(
-              company: _topCompanies[i],
-              onTap: () {
-                // Later: open company details page
-              },
-            ),
+            itemBuilder: (_, i) {
+              final c = _topCompanies[i];
+              final companyId = c['id']?.toString() ?? '';
+
+              return CompanyCard(
+                company: c,
+                onTap: () => _openCompanyDetails(companyId),
+              );
+            },
           ),
 
         const SizedBox(height: 10),
@@ -679,8 +696,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
           ],
         ),
       ),
-      // ❌ REMOVED bottomNavigationBar here
-      // Because JobSeekerMainShell already has bottom navigation.
     );
   }
 }
