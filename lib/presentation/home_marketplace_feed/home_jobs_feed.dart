@@ -1,3 +1,5 @@
+// File: lib/presentation/home_marketplace_feed/home_jobs_feed.dart
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -10,8 +12,8 @@ import '../../services/job_seeker_home_service.dart';
 import '../common/widgets/pages/job_details_page.dart';
 import '../common/widgets/cards/company_card.dart';
 
-import 'company_details_page.dart'; // ✅ ADDED
-import 'top_companies_page.dart'; // ✅ ADDED
+import 'company_details_page.dart';
+import 'top_companies_page.dart';
 
 import 'recommended_jobs_page.dart';
 import 'job_search_page.dart';
@@ -145,15 +147,14 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   Future<void> _loadInitialData() async {
     if (_isDisposed) return;
 
-    // ✅ auth already checked in _initialize()
-    // Now we can stop showing loader
+    // auth already checked in _initialize()
     if (!_isDisposed) {
       setState(() => _isCheckingAuth = false);
     }
 
     try {
       // ------------------------------------------------------------
-      // 1) Home summary (REAL)
+      // 1) Home summary
       // ------------------------------------------------------------
       final summary = await _homeService.getHomeProfileSummary();
       final jobsCount = await _homeService.getJobsPostedTodayCount();
@@ -603,7 +604,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
         const SizedBox(height: 18),
 
         // ------------------------------------------------------------
-        // TOP COMPANIES
+        // TOP COMPANIES (VERTICAL - SAME AS JOB CARDS)
         // ------------------------------------------------------------
         SectionHeader(
           title: "Top companies",
@@ -613,25 +614,13 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
         const SizedBox(height: 10),
 
         if (_loadingCompanies)
-          GridView.builder(
-            itemCount: 4,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 1.55,
-            ),
-            itemBuilder: (_, __) => Container(
-              decoration: KhilonjiyaUI.cardDecoration(radius: 16),
-              padding: const EdgeInsets.all(14),
-              child: const Center(
-                child: SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
+          Column(
+            children: List.generate(
+              4,
+              (_) => Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                height: 86,
+                decoration: KhilonjiyaUI.cardDecoration(radius: 16),
               ),
             ),
           )
@@ -644,16 +633,10 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
             ),
           )
         else
-          GridView.builder(
+          ListView.builder(
             itemCount: _topCompanies.length,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 1.55,
-            ),
             itemBuilder: (_, i) {
               final c = _topCompanies[i];
               final companyId = c['id']?.toString() ?? '';
