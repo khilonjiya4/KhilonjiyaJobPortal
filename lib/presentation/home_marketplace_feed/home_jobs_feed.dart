@@ -45,8 +45,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   bool _isCheckingAuth = true;
   bool _isDisposed = false;
 
-  int _bottomIndex = 0;
-
   // ------------------------------------------------------------
   // HOME SUMMARY (REAL)
   // ------------------------------------------------------------
@@ -455,7 +453,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
       );
     }
 
-    // This keeps your original behaviour
     final earlyAccessList =
         (_premiumJobs.isNotEmpty ? _premiumJobs : _recommendedJobs);
 
@@ -496,9 +493,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
         ),
         const SizedBox(height: 18),
 
-        // ============================================================
-        // RECOMMENDED JOBS (Horizontal)
-        // ============================================================
         SectionHeader(
           title: "Recommended jobs",
           ctaText: "View all",
@@ -526,9 +520,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
         const SizedBox(height: 18),
 
-        // ============================================================
-        // LATEST JOBS (Horizontal)
-        // ============================================================
         SectionHeader(
           title: "Latest jobs",
           ctaText: "View all",
@@ -556,9 +547,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
         const SizedBox(height: 18),
 
-        // ============================================================
-        // JOBS NEARBY (Horizontal)
-        // ============================================================
         SectionHeader(
           title: "Jobs nearby",
           ctaText: "View all",
@@ -586,9 +574,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
         const SizedBox(height: 18),
 
-        // ============================================================
-        // TOP COMPANIES (Grid)
-        // ============================================================
         SectionHeader(
           title: "Top companies",
           ctaText: "View all",
@@ -650,57 +635,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   }
 
   // ------------------------------------------------------------
-  // BOTTOM NAV
-  // ------------------------------------------------------------
-  Widget _buildBottomNav() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: KhilonjiyaUI.border)),
-      ),
-      child: BottomNavigationBar(
-        currentIndex: _bottomIndex,
-        onTap: (i) => setState(() => _bottomIndex = i),
-        type: BottomNavigationBarType.fixed,
-        elevation: 0,
-        backgroundColor: Colors.white,
-        selectedItemColor: KhilonjiyaUI.primary,
-        unselectedItemColor: const Color(0xFF64748B),
-        selectedLabelStyle: KhilonjiyaUI.sub.copyWith(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w800,
-        ),
-        unselectedLabelStyle: KhilonjiyaUI.sub.copyWith(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w700,
-        ),
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            label: "Home",
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.description_outlined),
-            label: "Apply",
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.mail_outline),
-            label: "NVites",
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            label: "Profile",
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.track_changes_outlined),
-            label: "Naukri 360",
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ------------------------------------------------------------
   // BUILD
   // ------------------------------------------------------------
   @override
@@ -726,7 +660,8 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
           ],
         ),
       ),
-      bottomNavigationBar: _buildBottomNav(),
+      // ❌ REMOVED bottomNavigationBar here
+      // Because JobSeekerMainShell already has bottom navigation.
     );
   }
 }
