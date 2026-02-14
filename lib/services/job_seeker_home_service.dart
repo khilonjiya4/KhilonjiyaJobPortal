@@ -668,21 +668,21 @@ class JobSeekerHomeService {
   // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchTopCompanies({
-    int limit = 8,
-  }) async {
-    _ensureAuthenticatedSync();
+  int limit = 8,
+}) async {
+  _ensureAuthenticatedSync();
 
-    final res = await _db
-        .from('companies_with_stats')
-        .select(
-          'id, name, slug, logo_url, industry, company_size, total_jobs, is_verified, description, website',
-        )
-        .order('total_jobs', ascending: false)
-        .limit(limit);
+  // This uses the SQL VIEW (companies_with_stats)
+  final res = await _db
+      .from('companies_with_stats')
+      .select(
+        'id, name, slug, logo_url, industry, company_size, is_verified, total_jobs',
+      )
+      .order('total_jobs', ascending: false)
+      .limit(limit);
 
-    return List<Map<String, dynamic>>.from(res);
-  }
-
+  return List<Map<String, dynamic>>.from(res);
+}
   // ============================================================
   // FOLLOW COMPANY
   // ============================================================
