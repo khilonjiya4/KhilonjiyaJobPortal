@@ -664,7 +664,7 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // TOP COMPANIES
+  // TOP COMPANIES  ✅ UPDATED (REAL)
   // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchTopCompanies({
@@ -673,11 +673,11 @@ class JobSeekerHomeService {
     _ensureAuthenticatedSync();
 
     final res = await _db
-        .from('companies')
+        .from('companies_with_stats')
         .select(
-          'id, name, slug, logo_url, industry, company_size, rating, total_reviews, total_jobs, is_verified, description, website',
+          'id, name, slug, logo_url, industry, company_size, total_jobs, is_verified, description, website',
         )
-        .order('rating', ascending: false)
+        .order('total_jobs', ascending: false)
         .limit(limit);
 
     return List<Map<String, dynamic>>.from(res);
