@@ -1,5 +1,3 @@
-// File: lib/presentation/home_marketplace_feed/widgets/home_sections/job_card_horizontal.dart
-
 import 'dart:math';
 import 'package:flutter/material.dart';
 import '../../../../core/ui/khilonjiya_ui.dart';
@@ -18,13 +16,13 @@ class JobCardHorizontal extends StatelessWidget {
     required this.onTap,
   }) : super(key: key);
 
-  static const double cardWidth = 300; // ✅ SAME AS BEFORE
-  static const double cardHeight = 210; // ✅ SAME AS HOME LIST HEIGHT
+  static const double cardWidth = 300; // keep same
+  static const double cardHeight = 210; // keep same
 
   @override
   Widget build(BuildContext context) {
     // ------------------------------------------------------------
-    // DATA (SAME AS JobCardWidget)
+    // DATA (same logic as JobCardWidget)
     // ------------------------------------------------------------
     final title = (job['job_title'] ?? job['title'] ?? 'Job').toString().trim();
 
@@ -60,7 +58,6 @@ class JobCardHorizontal extends StatelessWidget {
 
     final isInternship = _isInternship(job);
     final isWalkIn = _isWalkIn(job);
-
     final skills = _extractSkills(job);
 
     final postedAt = job['created_at']?.toString();
@@ -73,7 +70,7 @@ class JobCardHorizontal extends StatelessWidget {
       borderRadius: KhilonjiyaUI.r16,
       child: Container(
         width: cardWidth,
-        height: cardHeight, // ✅ FIXED HEIGHT
+        height: cardHeight,
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: Colors.white,
@@ -91,10 +88,10 @@ class JobCardHorizontal extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ============================================================
-            // ROW 1: LOGO + TITLE + SAVE
+            // HEADER: LOGO + TITLE + SAVE
             // ============================================================
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center, // ✅ important
               children: [
                 _CompanyLetterLogo(company: company, size: 48),
                 const SizedBox(width: 10),
@@ -102,17 +99,17 @@ class JobCardHorizontal extends StatelessWidget {
                 Expanded(
                   child: Text(
                     title.isEmpty ? "Job" : title,
-                    maxLines: 1, // ✅ FIXED (no gap issue)
+                    maxLines: 1, // ✅ always 1 line
                     overflow: TextOverflow.ellipsis,
                     style: KhilonjiyaUI.cardTitle.copyWith(
                       fontSize: 14.6,
                       fontWeight: FontWeight.w900,
-                      height: 1.15,
+                      height: 1.05, // ✅ removes gap
                     ),
                   ),
                 ),
 
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
 
                 InkWell(
                   onTap: onSaveToggle,
@@ -131,13 +128,13 @@ class JobCardHorizontal extends StatelessWidget {
               ],
             ),
 
-            const SizedBox(height: 4),
+            const SizedBox(height: 3),
 
             // ============================================================
-            // ROW 2: COMPANY (1 LINE)
+            // COMPANY: 1 LINE, NO EXTRA GAP
             // ============================================================
             Padding(
-              padding: const EdgeInsets.only(left: 58), // aligns with title
+              padding: const EdgeInsets.only(left: 58),
               child: Text(
                 company.isEmpty ? "Company" : company,
                 maxLines: 1,
@@ -146,7 +143,7 @@ class JobCardHorizontal extends StatelessWidget {
                   fontSize: 12.6,
                   fontWeight: FontWeight.w800,
                   color: const Color(0xFF334155),
-                  height: 1.15,
+                  height: 1.05, // ✅ removes gap
                 ),
               ),
             ),
@@ -154,78 +151,57 @@ class JobCardHorizontal extends StatelessWidget {
             const SizedBox(height: 10),
 
             // ============================================================
-            // ROW 3: LOCATION
+            // LOCATION / EXP / SALARY
             // ============================================================
             _plainRow(
               icon: Icons.location_on_rounded,
-              iconColor: const Color(0xFF2563EB), // ✅ colorful
+              iconColor: const Color(0xFF2563EB),
               text: location,
             ),
-
             const SizedBox(height: 7),
-
-            // ============================================================
-            // ROW 4: EXPERIENCE
-            // ============================================================
             _plainRow(
               icon: Icons.work_rounded,
-              iconColor: const Color(0xFF7C3AED), // ✅ colorful
+              iconColor: const Color(0xFF7C3AED),
               text: expText,
             ),
-
             const SizedBox(height: 7),
-
-            // ============================================================
-            // ROW 5: SALARY
-            // ============================================================
             _plainRow(
               icon: Icons.currency_rupee_rounded,
-              iconColor: const Color(0xFF16A34A), // ✅ colorful
+              iconColor: const Color(0xFF16A34A),
               text: salaryText,
             ),
 
             const SizedBox(height: 10),
 
             // ============================================================
-            // ROW 6: TAGS (1 LINE ONLY)
+            // TAGS (STRICT HEIGHT, NO OVERFLOW)
             // ============================================================
-            if (isInternship || isWalkIn || skills.isNotEmpty)
-              SizedBox(
-                height: 30, // ✅ fixed height so cards stay equal
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  physics: const BouncingScrollPhysics(),
-                  children: [
-                    if (isInternship) _metaTag("Internship"),
-                    if (isInternship) const SizedBox(width: 8),
-                    if (isWalkIn) _metaTag("Walk-in"),
-                    if (isWalkIn) const SizedBox(width: 8),
-                    ...skills.take(4).expand((s) => [
-                          _metaTag(s),
-                          const SizedBox(width: 8),
-                        ]),
-                  ],
-                ),
-              )
-            else
-              const SizedBox(height: 30), // keeps same height
+            _tagsRow(
+              isInternship: isInternship,
+              isWalkIn: isWalkIn,
+              skills: skills,
+            ),
 
             const Spacer(),
 
             // ============================================================
-            // FOOTER
+            // FOOTER (NO OVERLAP GUARANTEED)
             // ============================================================
             Row(
               children: [
-                Text(
-                  _postedAgo(postedAt),
-                  style: KhilonjiyaUI.sub.copyWith(
-                    fontSize: 12.0,
-                    color: const Color(0xFF94A3B8),
-                    fontWeight: FontWeight.w700,
+                Expanded(
+                  child: Text(
+                    _postedAgo(postedAt),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: KhilonjiyaUI.sub.copyWith(
+                      fontSize: 12.0,
+                      color: const Color(0xFF94A3B8),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 10),
                 const Icon(
                   Icons.arrow_forward,
                   size: 18,
@@ -240,9 +216,40 @@ class JobCardHorizontal extends StatelessWidget {
   }
 
   // ============================================================
+  // TAG ROW (NO OVERFLOW EVER)
+  // ============================================================
+  Widget _tagsRow({
+    required bool isInternship,
+    required bool isWalkIn,
+    required List<String> skills,
+  }) {
+    final tags = <String>[];
+
+    if (isInternship) tags.add("Internship");
+    if (isWalkIn) tags.add("Walk-in");
+
+    for (final s in skills.take(4)) {
+      if (s.trim().isNotEmpty) tags.add(s.trim());
+    }
+
+    // Always reserve exact height so all cards equal
+    if (tags.isEmpty) return const SizedBox(height: 28);
+
+    return SizedBox(
+      height: 28, // ✅ matches tag height
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        itemCount: tags.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) => _metaTag(tags[i]),
+      ),
+    );
+  }
+
+  // ============================================================
   // UI HELPERS
   // ============================================================
-
   Widget _plainRow({
     required IconData icon,
     required Color iconColor,
@@ -261,6 +268,7 @@ class JobCardHorizontal extends StatelessWidget {
               fontSize: 13.0,
               fontWeight: FontWeight.w800,
               color: const Color(0xFF0F172A),
+              height: 1.15,
             ),
           ),
         ),
@@ -270,7 +278,9 @@ class JobCardHorizontal extends StatelessWidget {
 
   Widget _metaTag(String text) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      height: 28, // ✅ fixed height so never overflow
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      alignment: Alignment.center,
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(999),
@@ -284,6 +294,7 @@ class JobCardHorizontal extends StatelessWidget {
           fontSize: 12.0,
           fontWeight: FontWeight.w800,
           color: const Color(0xFF334155),
+          height: 1.0,
         ),
       ),
     );
@@ -292,7 +303,6 @@ class JobCardHorizontal extends StatelessWidget {
   // ============================================================
   // EXPERIENCE FORMATTER
   // ============================================================
-
   String _formatExperience(Map<String, dynamic> job) {
     final raw = (job['experience_required'] ??
             job['experience_level'] ??
@@ -314,14 +324,10 @@ class JobCardHorizontal extends StatelessWidget {
       }
 
       final range = RegExp(r'^(\d+)\s*-\s*(\d+)$');
-      if (range.hasMatch(raw)) {
-        return "${raw.replaceAll(' ', '')} years";
-      }
+      if (range.hasMatch(raw)) return "${raw.replaceAll(' ', '')} years";
 
       final single = int.tryParse(raw);
-      if (single != null) {
-        return single == 1 ? "1 year" : "$single years";
-      }
+      if (single != null) return single == 1 ? "1 year" : "$single years";
 
       return raw;
     }
@@ -358,7 +364,6 @@ class JobCardHorizontal extends StatelessWidget {
   // ============================================================
   // SALARY
   // ============================================================
-
   String _salaryText({
     required dynamic salaryMin,
     required dynamic salaryMax,
@@ -391,10 +396,8 @@ class JobCardHorizontal extends StatelessWidget {
   // ============================================================
   // SKILLS
   // ============================================================
-
   List<String> _extractSkills(Map<String, dynamic> job) {
     final raw = job['skills_required'];
-
     if (raw == null) return [];
 
     if (raw is List) {
@@ -420,7 +423,6 @@ class JobCardHorizontal extends StatelessWidget {
   // ============================================================
   // TAGS
   // ============================================================
-
   bool _isInternship(Map<String, dynamic> job) {
     final employmentType =
         (job['employment_type'] ?? '').toString().toLowerCase();
@@ -437,7 +439,6 @@ class JobCardHorizontal extends StatelessWidget {
   // ============================================================
   // POSTED AGO
   // ============================================================
-
   String _postedAgo(String? date) {
     if (date == null) return 'Recently';
 
