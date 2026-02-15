@@ -1,6 +1,5 @@
 // File: lib/presentation/common/widgets/cards/job_card_horizontal.dart
 
-import 'dart:math';
 import 'package:flutter/material.dart';
 import '../../../../core/ui/khilonjiya_ui.dart';
 
@@ -18,8 +17,12 @@ class JobCardHorizontal extends StatelessWidget {
     required this.onTap,
   }) : super(key: key);
 
+  // Keep EXACT same as your earlier horizontal size
   static const double cardWidth = 320;
   static const double cardHeight = 170;
+
+  // Logo should be 30% of card height
+  static const double _logoSize = cardHeight * 0.30; // = 51
 
   @override
   Widget build(BuildContext context) {
@@ -28,6 +31,7 @@ class JobCardHorizontal extends StatelessWidget {
     // ------------------------------------------------------------
     final title = (job['job_title'] ?? job['title'] ?? 'Job').toString().trim();
 
+    // joined companies
     final companyMap = job['companies'];
     final companyName = (companyMap is Map<String, dynamic>)
         ? (companyMap['name'] ?? '').toString().trim()
@@ -57,17 +61,38 @@ class JobCardHorizontal extends StatelessWidget {
     final postedAt = job['created_at']?.toString();
 
     // ------------------------------------------------------------
-    // BUSINESS TYPE LOGO (placeholder for now)
-    // Later you will pass:
-    // job['business_type'] or job['companies']['industry']
+    // BUSINESS TYPE (Option A)
+    // companies.business_types_master.name + icon_url
     // ------------------------------------------------------------
-    final businessType =
-        (job['business_type'] ?? companyMap?['industry'] ?? 'Business')
-            .toString()
-            .trim();
+    String businessType = '';
+    String? businessIconUrl;
+
+    if (companyMap is Map<String, dynamic>) {
+      final bt = companyMap['business_types_master'];
+
+      if (bt is Map<String, dynamic>) {
+        businessType = (bt['name'] ?? '').toString().trim();
+        final url = (bt['icon_url'] ?? '').toString().trim();
+        businessIconUrl = url.isEmpty ? null : url;
+      }
+
+      // fallback if you stored directly in companies
+      if (businessType.isEmpty) {
+        businessType = (companyMap['business_type'] ?? '').toString().trim();
+      }
+      if (businessIconUrl == null) {
+        final url = (companyMap['business_icon_url'] ?? '').toString().trim();
+        businessIconUrl = url.isEmpty ? null : url;
+      }
+    }
+
+    if (businessType.isEmpty) businessType = "Business";
 
     // ------------------------------------------------------------
-    // UI
+    // UI (Same to same as vertical but compressed)
+    // - Only: Job, Company, Location, Salary, Posted ago, Logo
+    // - No tags
+    // - Fixed width & height
     // ------------------------------------------------------------
     return InkWell(
       onTap: onTap,
@@ -91,7 +116,7 @@ class JobCardHorizontal extends StatelessWidget {
         child: Column(
           children: [
             // ============================================================
-            // TOP: TITLE + SAVE + RIGHT LOGO
+            // TOP: TITLE + COMPANY + RIGHT LOGO + SAVE
             // ============================================================
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -101,36 +126,45 @@ class JobCardHorizontal extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // JOB TITLE (1 LINE)
+                      // JOB TITLE (HIGHEST)
                       Text(
                         title.isEmpty ? "Job" : title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: KhilonjiyaUI.cardTitle.copyWith(
-                          fontSize: 15.2,
+                          fontSize: 15.4,
                           fontWeight: FontWeight.w900,
-                          height: 1.15,
+                          height: 1.10,
                         ),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 6),
 
-                      // COMPANY (1 LINE)
+                      // COMPANY (MEDIUM)
                       Text(
                         company.isEmpty ? "Company" : company,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: KhilonjiyaUI.sub.copyWith(
-                          fontSize: 13.0,
-                          fontWeight: FontWeight.w800,
+                        style: KhilonjiyaUI.body.copyWith(
+                          fontSize: 13.1,
+                          fontWeight: FontWeight.w900,
                           color: const Color(0xFF334155),
-                          height: 1.15,
+                          height: 1.10,
                         ),
                       ),
                     ],
                   ),
                 ),
 
-                const SizedBox(width: 8),
+                const SizedBox(width: 10),
+
+                // RIGHT LOGO (CENTERED)
+                _BusinessTypeIcon(
+                  businessType: businessType,
+                  iconUrl: businessIconUrl,
+                  size: _logoSize, // 30% of card height
+                ),
+
+                const SizedBox(width: 6),
 
                 // SAVE ICON
                 InkWell(
@@ -147,18 +181,10 @@ class JobCardHorizontal extends StatelessWidget {
                     ),
                   ),
                 ),
-
-                const SizedBox(width: 6),
-
-                // RIGHT SIDE LOGO (BUSINESS TYPE)
-                _BusinessTypeLogo(
-                  businessType: businessType,
-                  size: 52,
-                ),
               ],
             ),
 
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
 
             // ============================================================
             // LOCATION
@@ -193,7 +219,7 @@ class JobCardHorizontal extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: KhilonjiyaUI.sub.copyWith(
-                      fontSize: 12.2,
+                      fontSize: 12.1,
                       color: const Color(0xFF94A3B8),
                       fontWeight: FontWeight.w700,
                     ),
@@ -231,9 +257,10 @@ class JobCardHorizontal extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: KhilonjiyaUI.body.copyWith(
-              fontSize: 13.2,
+              fontSize: 13.1,
               fontWeight: FontWeight.w800,
               color: const Color(0xFF0F172A),
+              height: 1.20,
             ),
           ),
         ),
@@ -285,44 +312,64 @@ class JobCardHorizontal extends StatelessWidget {
 }
 
 // ============================================================
-// BUSINESS TYPE LOGO PLACEHOLDER
-// Later replace with actual image mapping
+// BUSINESS TYPE ICON (Option A)
+// - Uses icon_url if available
+// - Else first letter of business type
 // ============================================================
-class _BusinessTypeLogo extends StatelessWidget {
+class _BusinessTypeIcon extends StatelessWidget {
   final String businessType;
+  final String? iconUrl;
   final double size;
 
-  const _BusinessTypeLogo({
+  const _BusinessTypeIcon({
     required this.businessType,
-    this.size = 52,
+    required this.iconUrl,
+    required this.size,
   });
 
   @override
   Widget build(BuildContext context) {
-    final name = businessType.trim();
-    final letter = name.isNotEmpty ? name[0].toUpperCase() : 'B';
-
-    final color = Colors.primaries[
-        Random(name.isEmpty ? 1 : name.hashCode).nextInt(Colors.primaries.length)
-    ];
+    final t = businessType.trim();
+    final letter = t.isNotEmpty ? t[0].toUpperCase() : "B";
 
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: color.withOpacity(0.10),
+        color: const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: KhilonjiyaUI.border),
       ),
-      alignment: Alignment.center,
-      child: Text(
-        letter,
-        style: TextStyle(
-          fontSize: size * 0.38,
-          fontWeight: FontWeight.w900,
-          color: color,
-        ),
-      ),
+      clipBehavior: Clip.antiAlias,
+      child: (iconUrl == null || iconUrl!.trim().isEmpty)
+          ? Center(
+              child: Text(
+                letter,
+                style: TextStyle(
+                  fontSize: size * 0.44,
+                  fontWeight: FontWeight.w900,
+                  color: const Color(0xFF0F172A),
+                  height: 1.0,
+                ),
+              ),
+            )
+          : Image.network(
+              iconUrl!,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) {
+                return Center(
+                  child: Text(
+                    letter,
+                    style: TextStyle(
+                      fontSize: size * 0.44,
+                      fontWeight: FontWeight.w900,
+                      color: const Color(0xFF0F172A),
+                      height: 1.0,
+                    ),
+                  ),
+                );
+              },
+            ),
     );
   }
 }
