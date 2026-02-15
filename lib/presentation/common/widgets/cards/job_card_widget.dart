@@ -55,7 +55,6 @@ class JobCardWidget extends StatelessWidget {
       salaryPeriod: salaryPeriodRaw,
     );
 
-    // Skills + tags
     final skills = _extractSkills(job);
     final isInternship = _isInternship(job);
     final isWalkIn = _isWalkIn(job);
@@ -87,7 +86,7 @@ class JobCardWidget extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ============================================================
-            // ROW 1: LOGO + TITLE + SAVE
+            // HEADER ROW (LOGO + TITLE + COMPANY + SAVE)
             // ============================================================
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -96,15 +95,36 @@ class JobCardWidget extends StatelessWidget {
                 const SizedBox(width: 12),
 
                 Expanded(
-                  child: Text(
-                    title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: KhilonjiyaUI.cardTitle.copyWith(
-                      fontSize: 15.2,
-                      fontWeight: FontWeight.w900,
-                      height: 1.25,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // JOB TITLE (1 LINE)
+                      Text(
+                        title.isEmpty ? "Job" : title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: KhilonjiyaUI.cardTitle.copyWith(
+                          fontSize: 15.2,
+                          fontWeight: FontWeight.w900,
+                          height: 1.15,
+                        ),
+                      ),
+
+                      const SizedBox(height: 4),
+
+                      // COMPANY (1 LINE)
+                      Text(
+                        company.isEmpty ? "Company" : company,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: KhilonjiyaUI.sub.copyWith(
+                          fontSize: 13.0,
+                          fontWeight: FontWeight.w800,
+                          color: const Color(0xFF334155),
+                          height: 1.15,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
 
@@ -127,57 +147,41 @@ class JobCardWidget extends StatelessWidget {
               ],
             ),
 
-            const SizedBox(height: 6),
+            const SizedBox(height: 14),
 
             // ============================================================
-            // ROW 2: COMPANY
-            // ============================================================
-            Padding(
-              padding: const EdgeInsets.only(left: 64), // aligns with title start
-              child: Text(
-                company,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: KhilonjiyaUI.sub.copyWith(
-                  fontSize: 13.0,
-                  fontWeight: FontWeight.w800,
-                  color: const Color(0xFF334155),
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 12),
-
-            // ============================================================
-            // ROW 3: LOCATION
+            // LOCATION (COLORED ICON)
             // ============================================================
             _plainRow(
-              icon: Icons.location_on_outlined,
+              icon: Icons.location_on_rounded,
+              iconColor: const Color(0xFF2563EB),
               text: location,
             ),
 
             const SizedBox(height: 8),
 
             // ============================================================
-            // ROW 4: EXPERIENCE
+            // EXPERIENCE (COLORED ICON)
             // ============================================================
             _plainRow(
-              icon: Icons.work_outline_rounded,
+              icon: Icons.work_rounded,
+              iconColor: const Color(0xFF7C3AED),
               text: expText,
             ),
 
             const SizedBox(height: 8),
 
             // ============================================================
-            // ROW 5: SALARY
+            // SALARY (COLORED ICON)
             // ============================================================
             _plainRow(
               icon: Icons.currency_rupee_rounded,
+              iconColor: const Color(0xFF16A34A),
               text: salaryText,
             ),
 
             // ============================================================
-            // ROW 6: SYSTEMATIC TAGS (BELOW SALARY)
+            // SYSTEMATIC TAGS (BELOW SALARY)
             // ============================================================
             if (isInternship || isWalkIn) ...[
               const SizedBox(height: 12),
@@ -192,7 +196,7 @@ class JobCardWidget extends StatelessWidget {
             ],
 
             // ============================================================
-            // ROW 7: SKILLS META TAGS (AFTER SYSTEMATIC TAGS)
+            // SKILLS TAGS
             // ============================================================
             if (skills.isNotEmpty) ...[
               const SizedBox(height: 10),
@@ -206,7 +210,7 @@ class JobCardWidget extends StatelessWidget {
             const SizedBox(height: 14),
 
             // ============================================================
-            // ROW 8: POSTED AGO
+            // POSTED AGO
             // ============================================================
             Row(
               children: [
@@ -238,11 +242,12 @@ class JobCardWidget extends StatelessWidget {
 
   Widget _plainRow({
     required IconData icon,
+    required Color iconColor,
     required String text,
   }) {
     return Row(
       children: [
-        Icon(icon, size: 18, color: const Color(0xFF64748B)),
+        Icon(icon, size: 18, color: iconColor),
         const SizedBox(width: 10),
         Expanded(
           child: Text(
@@ -251,7 +256,7 @@ class JobCardWidget extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: KhilonjiyaUI.body.copyWith(
               fontSize: 13.2,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w800,
               color: const Color(0xFF0F172A),
             ),
           ),
@@ -282,7 +287,7 @@ class JobCardWidget extends StatelessWidget {
   }
 
   // ============================================================
-  // EXPERIENCE FORMATTER (2-3 years / 3 years / Fresher)
+  // EXPERIENCE FORMATTER
   // ============================================================
 
   String _formatExperience(Map<String, dynamic> job) {
@@ -298,7 +303,6 @@ class JobCardWidget extends StatelessWidget {
 
       if (lower.contains('fresh')) return "Fresher";
 
-      // Already contains year(s)
       if (lower.contains('year')) {
         final cleaned = raw.replaceAll(RegExp(r'\s+'), ' ');
         return cleaned
@@ -306,13 +310,11 @@ class JobCardWidget extends StatelessWidget {
             .replaceAll('Year', 'year');
       }
 
-      // Range: "2-3"
       final range = RegExp(r'^(\d+)\s*-\s*(\d+)$');
       if (range.hasMatch(raw)) {
         return "${raw.replaceAll(' ', '')} years";
       }
 
-      // Single number: "3"
       final single = int.tryParse(raw);
       if (single != null) {
         return single == 1 ? "1 year" : "$single years";
@@ -321,7 +323,6 @@ class JobCardWidget extends StatelessWidget {
       return raw;
     }
 
-    // Optional support for future fields
     final expMin = job['experience_min'];
     final expMax = job['experience_max'];
 
@@ -352,7 +353,7 @@ class JobCardWidget extends StatelessWidget {
   }
 
   // ============================================================
-  // SALARY (5000 - 10000 per month)
+  // SALARY
   // ============================================================
 
   String _salaryText({
@@ -381,7 +382,6 @@ class JobCardWidget extends StatelessWidget {
       range = "Up to ${mx!}";
     }
 
-    // Force monthly label
     return "$range per month";
   }
 
@@ -468,7 +468,6 @@ class _CompanyLetterLogo extends StatelessWidget {
     final name = company.trim();
     final letter = name.isNotEmpty ? name[0].toUpperCase() : 'C';
 
-    // deterministic random color per company
     final color = Colors.primaries[
         Random(name.isEmpty ? 1 : name.hashCode).nextInt(Colors.primaries.length)
     ];
