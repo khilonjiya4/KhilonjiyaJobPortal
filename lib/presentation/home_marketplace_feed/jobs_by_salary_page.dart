@@ -1,3 +1,5 @@
+// File: lib/presentation/home_marketplace_feed/jobs_by_salary_page.dart
+
 import 'package:flutter/material.dart';
 
 import '../../core/ui/khilonjiya_ui.dart';
@@ -43,6 +45,9 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
     super.dispose();
   }
 
+  // ------------------------------------------------------------
+  // LOAD
+  // ------------------------------------------------------------
   Future<void> _load() async {
     if (!_disposed) setState(() => _loading = true);
 
@@ -138,6 +143,12 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
   // ------------------------------------------------------------
   // EDIT SALARY (updates profile + refresh)
   // ------------------------------------------------------------
+  int _parseSalary(String raw) {
+    final clean = raw.trim().replaceAll(',', '');
+    if (clean.isEmpty) return 0;
+    return int.tryParse(clean) ?? 0;
+  }
+
   Future<void> _editExpectedSalary() async {
     final ctrl = TextEditingController(
       text: _expectedSalary <= 0 ? '' : _expectedSalary.toString(),
@@ -215,8 +226,7 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
                   height: 44,
                   child: ElevatedButton(
                     onPressed: () {
-                      final raw = ctrl.text.trim();
-                      final v = int.tryParse(raw) ?? 0;
+                      final v = _parseSalary(ctrl.text);
                       Navigator.pop(context, v);
                     },
                     style: ElevatedButton.styleFrom(
@@ -244,6 +254,14 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
     if (res == null) return;
 
     final clean = res < 0 ? 0 : res;
+
+    if (clean <= 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Enter a valid salary amount")),
+      );
+      return;
+    }
 
     try {
       await _homeService.updateExpectedSalaryPerMonth(clean);
