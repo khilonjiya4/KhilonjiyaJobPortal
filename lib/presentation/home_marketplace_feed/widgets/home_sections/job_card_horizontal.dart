@@ -18,47 +18,62 @@ class JobCardHorizontal extends StatelessWidget {
     required this.onTap,
   }) : super(key: key);
 
+  static const double cardWidth = 300; // ✅ SAME AS BEFORE
+  static const double cardHeight = 210; // ✅ SAME AS HOME LIST HEIGHT
+
   @override
   Widget build(BuildContext context) {
-    final title = (job['job_title'] ?? job['title'] ?? 'Job').toString();
-    final company = (job['company_name'] ?? job['company'] ?? 'Company')
-        .toString();
+    // ------------------------------------------------------------
+    // DATA (SAME AS JobCardWidget)
+    // ------------------------------------------------------------
+    final title = (job['job_title'] ?? job['title'] ?? 'Job').toString().trim();
 
-    final location = (job['district'] ?? job['location'] ?? 'Location')
-        .toString();
+    final companyMap = job['companies'];
+    final companyName = (companyMap is Map<String, dynamic>)
+        ? (companyMap['name'] ?? '').toString().trim()
+        : '';
 
-    final experience = (job['experience_required'] ??
-            job['experience_level'] ??
-            job['experience'] ??
-            'Experience not specified')
-        .toString();
+    final company = companyName.isNotEmpty
+        ? companyName
+        : (job['company_name'] ?? job['company'] ?? 'Company')
+            .toString()
+            .trim();
+
+    final location = (job['district'] ??
+            job['location'] ??
+            job['job_address'] ??
+            'Location')
+        .toString()
+        .trim();
 
     final salaryMin = job['salary_min'];
     final salaryMax = job['salary_max'];
     final salaryPeriodRaw = (job['salary_period'] ?? 'Monthly').toString();
 
-    final skillsList = (job['skills_required'] as List?)?.cast<dynamic>() ?? [];
-    final skillsText = skillsList.map((e) => e.toString()).join(', ');
+    final expText = _formatExperience(job);
 
-    final vacancies = job['vacancies'];
-    final postedAt = job['created_at']?.toString();
-
-    final isInternship =
-        (job['employment_type'] ?? '').toString().toLowerCase().contains('intern');
-    final isWalkIn =
-        (job['job_type'] ?? '').toString().toLowerCase().contains('walk');
-
-    final salaryText = _salaryMonthly(
+    final salaryText = _salaryText(
       salaryMin: salaryMin,
       salaryMax: salaryMax,
       salaryPeriod: salaryPeriodRaw,
     );
 
+    final isInternship = _isInternship(job);
+    final isWalkIn = _isWalkIn(job);
+
+    final skills = _extractSkills(job);
+
+    final postedAt = job['created_at']?.toString();
+
+    // ------------------------------------------------------------
+    // UI
+    // ------------------------------------------------------------
     return InkWell(
       onTap: onTap,
       borderRadius: KhilonjiyaUI.r16,
       child: Container(
-        width: 300, // important for horizontal list
+        width: cardWidth,
+        height: cardHeight, // ✅ FIXED HEIGHT
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: Colors.white,
@@ -75,38 +90,29 @@ class JobCardHorizontal extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ------------------------------------------------------------
-            // HEADER
-            // ------------------------------------------------------------
+            // ============================================================
+            // ROW 1: LOGO + TITLE + SAVE
+            // ============================================================
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _CompanyLogo(company: company, size: 48),
+                _CompanyLetterLogo(company: company, size: 48),
                 const SizedBox(width: 10),
 
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: KhilonjiyaUI.cardTitle.copyWith(
-                          fontSize: 14.2,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        company,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: KhilonjiyaUI.sub.copyWith(fontSize: 12.6),
-                      ),
-                    ],
+                  child: Text(
+                    title.isEmpty ? "Job" : title,
+                    maxLines: 1, // ✅ FIXED (no gap issue)
+                    overflow: TextOverflow.ellipsis,
+                    style: KhilonjiyaUI.cardTitle.copyWith(
+                      fontSize: 14.6,
+                      fontWeight: FontWeight.w900,
+                      height: 1.15,
+                    ),
                   ),
                 ),
+
+                const SizedBox(width: 8),
 
                 InkWell(
                   onTap: onSaveToggle,
@@ -125,65 +131,96 @@ class JobCardHorizontal extends StatelessWidget {
               ],
             ),
 
-            const SizedBox(height: 10),
+            const SizedBox(height: 4),
 
-            // ------------------------------------------------------------
-            // TAGS
-            // ------------------------------------------------------------
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                if (isInternship) _tagPill("Internship"),
-                if (isWalkIn) _tagPill("Walk-in"),
-                if (vacancies != null) _tagPill("$vacancies Vacancies"),
-              ],
-            ),
-
-            if (isInternship || isWalkIn || vacancies != null)
-              const SizedBox(height: 10),
-
-            // ------------------------------------------------------------
-            // META PILLS
-            // ------------------------------------------------------------
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _pill(Icons.location_on_outlined, location, maxWidth: 160),
-                _pill(Icons.work_outline, experience, maxWidth: 160),
-                _pill(Icons.currency_rupee, salaryText, maxWidth: 200),
-              ],
-            ),
-
-            // ------------------------------------------------------------
-            // SKILLS
-            // ------------------------------------------------------------
-            if (skillsText.trim().isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Text(
-                skillsText,
+            // ============================================================
+            // ROW 2: COMPANY (1 LINE)
+            // ============================================================
+            Padding(
+              padding: const EdgeInsets.only(left: 58), // aligns with title
+              child: Text(
+                company.isEmpty ? "Company" : company,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: KhilonjiyaUI.sub.copyWith(
-                  fontSize: 12.2,
-                  color: const Color(0xFF64748B),
-                  fontWeight: FontWeight.w700,
+                  fontSize: 12.6,
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF334155),
+                  height: 1.15,
                 ),
               ),
-            ],
+            ),
+
+            const SizedBox(height: 10),
+
+            // ============================================================
+            // ROW 3: LOCATION
+            // ============================================================
+            _plainRow(
+              icon: Icons.location_on_rounded,
+              iconColor: const Color(0xFF2563EB), // ✅ colorful
+              text: location,
+            ),
+
+            const SizedBox(height: 7),
+
+            // ============================================================
+            // ROW 4: EXPERIENCE
+            // ============================================================
+            _plainRow(
+              icon: Icons.work_rounded,
+              iconColor: const Color(0xFF7C3AED), // ✅ colorful
+              text: expText,
+            ),
+
+            const SizedBox(height: 7),
+
+            // ============================================================
+            // ROW 5: SALARY
+            // ============================================================
+            _plainRow(
+              icon: Icons.currency_rupee_rounded,
+              iconColor: const Color(0xFF16A34A), // ✅ colorful
+              text: salaryText,
+            ),
+
+            const SizedBox(height: 10),
+
+            // ============================================================
+            // ROW 6: TAGS (1 LINE ONLY)
+            // ============================================================
+            if (isInternship || isWalkIn || skills.isNotEmpty)
+              SizedBox(
+                height: 30, // ✅ fixed height so cards stay equal
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  children: [
+                    if (isInternship) _metaTag("Internship"),
+                    if (isInternship) const SizedBox(width: 8),
+                    if (isWalkIn) _metaTag("Walk-in"),
+                    if (isWalkIn) const SizedBox(width: 8),
+                    ...skills.take(4).expand((s) => [
+                          _metaTag(s),
+                          const SizedBox(width: 8),
+                        ]),
+                  ],
+                ),
+              )
+            else
+              const SizedBox(height: 30), // keeps same height
 
             const Spacer(),
 
-            // ------------------------------------------------------------
+            // ============================================================
             // FOOTER
-            // ------------------------------------------------------------
+            // ============================================================
             Row(
               children: [
                 Text(
                   _postedAgo(postedAt),
                   style: KhilonjiyaUI.sub.copyWith(
-                    fontSize: 12.2,
+                    fontSize: 12.0,
                     color: const Color(0xFF94A3B8),
                     fontWeight: FontWeight.w700,
                   ),
@@ -202,63 +239,127 @@ class JobCardHorizontal extends StatelessWidget {
     );
   }
 
-  // ------------------------------------------------------------
-  // UI HELPERS (same as JobCardWidget)
-  // ------------------------------------------------------------
-  Widget _pill(
-    IconData icon,
-    String text, {
-    double maxWidth = 160,
+  // ============================================================
+  // UI HELPERS
+  // ============================================================
+
+  Widget _plainRow({
+    required IconData icon,
+    required Color iconColor,
+    required String text,
   }) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: iconColor),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            text.trim().isEmpty ? "—" : text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: KhilonjiyaUI.body.copyWith(
+              fontSize: 13.0,
+              fontWeight: FontWeight.w800,
+              color: const Color(0xFF0F172A),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _metaTag(String text) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: KhilonjiyaUI.border),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: const Color(0xFF64748B)),
-          const SizedBox(width: 6),
-          ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: maxWidth),
-            child: Text(
-              text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: KhilonjiyaUI.sub.copyWith(fontSize: 12.0),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _tagPill(String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: KhilonjiyaUI.primary.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: KhilonjiyaUI.primary.withOpacity(0.12)),
-      ),
       child: Text(
         text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: KhilonjiyaUI.sub.copyWith(
           fontSize: 12.0,
           fontWeight: FontWeight.w800,
-          color: KhilonjiyaUI.primary,
+          color: const Color(0xFF334155),
         ),
       ),
     );
   }
 
-  // ------------------------------------------------------------
-  // SALARY (FORCE MONTHLY)
-  // ------------------------------------------------------------
-  String _salaryMonthly({
+  // ============================================================
+  // EXPERIENCE FORMATTER
+  // ============================================================
+
+  String _formatExperience(Map<String, dynamic> job) {
+    final raw = (job['experience_required'] ??
+            job['experience_level'] ??
+            job['experience'] ??
+            '')
+        .toString()
+        .trim();
+
+    if (raw.isNotEmpty) {
+      final lower = raw.toLowerCase();
+
+      if (lower.contains('fresh')) return "Fresher";
+
+      if (lower.contains('year')) {
+        final cleaned = raw.replaceAll(RegExp(r'\s+'), ' ');
+        return cleaned
+            .replaceAll('Years', 'years')
+            .replaceAll('Year', 'year');
+      }
+
+      final range = RegExp(r'^(\d+)\s*-\s*(\d+)$');
+      if (range.hasMatch(raw)) {
+        return "${raw.replaceAll(' ', '')} years";
+      }
+
+      final single = int.tryParse(raw);
+      if (single != null) {
+        return single == 1 ? "1 year" : "$single years";
+      }
+
+      return raw;
+    }
+
+    final expMin = job['experience_min'];
+    final expMax = job['experience_max'];
+
+    int? toInt(dynamic v) {
+      if (v == null) return null;
+      if (v is int) return v;
+      if (v is double) return v.toInt();
+      return int.tryParse(v.toString());
+    }
+
+    final mn = toInt(expMin);
+    final mx = toInt(expMax);
+
+    if (mn == null && mx == null) return "Experience not specified";
+
+    if (mn != null && mx != null) {
+      if (mn == 0 && mx == 0) return "Fresher";
+      if (mn == mx) return mn == 1 ? "1 year" : "$mn years";
+      return "$mn-$mx years";
+    }
+
+    if (mn != null) {
+      if (mn == 0) return "Fresher";
+      return mn == 1 ? "1 year" : "$mn years";
+    }
+
+    return "Up to $mx years";
+  }
+
+  // ============================================================
+  // SALARY
+  // ============================================================
+
+  String _salaryText({
     required dynamic salaryMin,
     required dynamic salaryMax,
     required String salaryPeriod,
@@ -275,21 +376,67 @@ class JobCardHorizontal extends StatelessWidget {
 
     if (mn == null && mx == null) return "Not disclosed";
 
-    String fmt(int v) {
-      return v.toString().replaceAllMapped(
-            RegExp(r'\B(?=(\d{3})+(?!\d))'),
-            (m) => ',',
-          );
+    String range;
+    if (mn != null && mx != null) {
+      range = "$mn-$mx";
+    } else if (mn != null) {
+      range = "$mn+";
+    } else {
+      range = "Up to ${mx!}";
     }
 
-    final range = (mn != null && mx != null)
-        ? "₹${fmt(mn)} - ₹${fmt(mx)}"
-        : (mn != null)
-            ? "₹${fmt(mn)}+"
-            : "Up to ₹${fmt(mx!)}";
-
-    return "$range / month";
+    return "$range per month";
   }
+
+  // ============================================================
+  // SKILLS
+  // ============================================================
+
+  List<String> _extractSkills(Map<String, dynamic> job) {
+    final raw = job['skills_required'];
+
+    if (raw == null) return [];
+
+    if (raw is List) {
+      return raw
+          .map((e) => e.toString().trim())
+          .where((e) => e.isNotEmpty)
+          .toSet()
+          .toList();
+    }
+
+    final s = raw.toString().trim();
+    if (s.isEmpty) return [];
+
+    final cleaned = s.replaceAll('{', '').replaceAll('}', '');
+    return cleaned
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
+  }
+
+  // ============================================================
+  // TAGS
+  // ============================================================
+
+  bool _isInternship(Map<String, dynamic> job) {
+    final employmentType =
+        (job['employment_type'] ?? '').toString().toLowerCase();
+    return employmentType.contains('intern');
+  }
+
+  bool _isWalkIn(Map<String, dynamic> job) {
+    final jobType = (job['job_type'] ?? '').toString().toLowerCase();
+    final isWalk = jobType.contains('walk');
+    final isWalkInFlag = (job['is_walk_in'] ?? false) == true;
+    return isWalk || isWalkInFlag;
+  }
+
+  // ============================================================
+  // POSTED AGO
+  // ============================================================
 
   String _postedAgo(String? date) {
     if (date == null) return 'Recently';
@@ -307,23 +454,26 @@ class JobCardHorizontal extends StatelessWidget {
   }
 }
 
-// ------------------------------------------------------------
-// COMPANY LOGO (LEFT) - SAME STYLE AS JobCardWidget
-// ------------------------------------------------------------
-class _CompanyLogo extends StatelessWidget {
+// ============================================================
+// COMPANY LOGO (FIRST LETTER ONLY)
+// ============================================================
+class _CompanyLetterLogo extends StatelessWidget {
   final String company;
   final double size;
 
-  const _CompanyLogo({
+  const _CompanyLetterLogo({
     required this.company,
     this.size = 52,
   });
 
   @override
   Widget build(BuildContext context) {
-    final letter = company.isNotEmpty ? company[0].toUpperCase() : 'C';
+    final name = company.trim();
+    final letter = name.isNotEmpty ? name[0].toUpperCase() : 'C';
+
     final color = Colors.primaries[
-        Random(company.hashCode).nextInt(Colors.primaries.length)];
+        Random(name.isEmpty ? 1 : name.hashCode).nextInt(Colors.primaries.length)
+    ];
 
     return Container(
       width: size,
