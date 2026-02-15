@@ -1,5 +1,3 @@
-// File: lib/presentation/common/widgets/cards/company_card.dart
-
 import 'package:flutter/material.dart';
 import '../../../../core/ui/khilonjiya_ui.dart';
 
@@ -13,6 +11,9 @@ class CompanyCard extends StatelessWidget {
     this.onTap,
   }) : super(key: key);
 
+  static const double _cardHeight = 108; // fixed (same feel as job cards)
+  static const double _logoSize = _cardHeight * 0.30; // 32.4
+
   @override
   Widget build(BuildContext context) {
     // ------------------------------------------------------------
@@ -20,9 +21,7 @@ class CompanyCard extends StatelessWidget {
     // ------------------------------------------------------------
     final name = (company['name'] ?? 'Company').toString().trim();
 
-    // Business type join:
-    // companies_with_stats should return:
-    // business_types_master(type_name, logo_url)
+    // Option A: companies.business_types_master(type_name, logo_url)
     final bt = company['business_types_master'];
 
     String businessType = '';
@@ -34,7 +33,7 @@ class CompanyCard extends StatelessWidget {
       businessIconUrl = url.isEmpty ? null : url;
     }
 
-    // fallback if not joined
+    // fallback
     if (businessType.isEmpty) {
       businessType = (company['industry'] ?? 'Business').toString().trim();
     }
@@ -50,12 +49,13 @@ class CompanyCard extends StatelessWidget {
     final totalJobs = _toInt(company['total_jobs']);
 
     // ------------------------------------------------------------
-    // UI (SAME SIZE AS JOB CARD WIDGET)
+    // UI
     // ------------------------------------------------------------
     return InkWell(
       onTap: onTap,
       borderRadius: KhilonjiyaUI.r16,
       child: Container(
+        height: _cardHeight,
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -73,12 +73,12 @@ class CompanyCard extends StatelessWidget {
         child: Row(
           children: [
             // ============================================================
-            // LEFT: BUSINESS TYPE LOGO (NO COMPANY LOGO)
+            // LEFT: BUSINESS TYPE LOGO (30% HEIGHT)
             // ============================================================
             _BusinessTypeIcon(
               businessType: businessType,
               iconUrl: businessIconUrl,
-              size: 54, // matches old company logo size + job card feel
+              size: _logoSize,
             ),
 
             const SizedBox(width: 14),
@@ -89,6 +89,7 @@ class CompanyCard extends StatelessWidget {
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   // COMPANY NAME (HIGHEST)
                   Text(
@@ -96,15 +97,15 @@ class CompanyCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: KhilonjiyaUI.cardTitle.copyWith(
-                      fontSize: 15.6,
+                      fontSize: 15.4,
                       fontWeight: FontWeight.w900,
-                      height: 1.10,
+                      height: 1.05,
                     ),
                   ),
 
                   const SizedBox(height: 6),
 
-                  // BUSINESS TYPE NAME (SECOND)
+                  // BUSINESS TYPE (SECOND)
                   Text(
                     businessType,
                     maxLines: 1,
@@ -113,22 +114,72 @@ class CompanyCard extends StatelessWidget {
                       fontSize: 12.8,
                       fontWeight: FontWeight.w800,
                       color: const Color(0xFF64748B),
-                      height: 1.10,
+                      height: 1.05,
                     ),
                   ),
 
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
 
-                  // META ROW (SAME SIZE)
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 6,
+                  // META (clean + minimal)
+                  Row(
                     children: [
-                      if (isVerified) _metaChip("Verified", Icons.verified),
-                      if (rating > 0) _metaChip("${rating.toStringAsFixed(1)}",
-                          Icons.star_rounded),
-                      if (companySize.isNotEmpty)
-                        _metaChip(companySize, Icons.groups_rounded),
+                      if (isVerified) ...[
+                        const Icon(
+                          Icons.verified_rounded,
+                          size: 15,
+                          color: Color(0xFF2563EB),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          "Verified",
+                          style: KhilonjiyaUI.sub.copyWith(
+                            fontSize: 12.0,
+                            fontWeight: FontWeight.w800,
+                            color: const Color(0xFF334155),
+                            height: 1.0,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                      ],
+                      if (rating > 0) ...[
+                        const Icon(
+                          Icons.star_rounded,
+                          size: 16,
+                          color: Color(0xFFF59E0B),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          rating.toStringAsFixed(1),
+                          style: KhilonjiyaUI.sub.copyWith(
+                            fontSize: 12.0,
+                            fontWeight: FontWeight.w800,
+                            color: const Color(0xFF334155),
+                            height: 1.0,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                      ],
+                      if (companySize.isNotEmpty) ...[
+                        const Icon(
+                          Icons.groups_rounded,
+                          size: 16,
+                          color: Color(0xFF64748B),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            companySize,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: KhilonjiyaUI.sub.copyWith(
+                              fontSize: 12.0,
+                              fontWeight: FontWeight.w800,
+                              color: const Color(0xFF64748B),
+                              height: 1.0,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ],
@@ -141,14 +192,15 @@ class CompanyCard extends StatelessWidget {
             // RIGHT: JOB COUNT (LIGHT ORANGE + SMALLER)
             // ============================================================
             Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
                   totalJobs <= 0 ? "0" : "$totalJobs",
                   style: KhilonjiyaUI.cardTitle.copyWith(
-                    fontSize: 14.4, // smaller than before
+                    fontSize: 14.2,
                     fontWeight: FontWeight.w900,
-                    color: const Color(0xFFF59E0B), // light orange
+                    color: const Color(0xFFF59E0B),
                     height: 1.0,
                   ),
                 ),
@@ -179,29 +231,8 @@ class CompanyCard extends StatelessWidget {
   }
 
   // ============================================================
-  // META CHIP
+  // HELPERS
   // ============================================================
-  Widget _metaChip(String text, IconData icon) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 15, color: const Color(0xFF64748B)),
-        const SizedBox(width: 5),
-        Text(
-          text,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: KhilonjiyaUI.sub.copyWith(
-            fontSize: 12.0,
-            fontWeight: FontWeight.w800,
-            color: const Color(0xFF64748B),
-            height: 1.0,
-          ),
-        ),
-      ],
-    );
-  }
-
   int _toInt(dynamic v) {
     if (v == null) return 0;
     if (v is int) return v;
@@ -230,7 +261,7 @@ class _BusinessTypeIcon extends StatelessWidget {
   const _BusinessTypeIcon({
     required this.businessType,
     required this.iconUrl,
-    this.size = 54,
+    required this.size,
   });
 
   @override
@@ -243,7 +274,7 @@ class _BusinessTypeIcon extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: KhilonjiyaUI.border),
       ),
       clipBehavior: Clip.antiAlias,
@@ -252,7 +283,7 @@ class _BusinessTypeIcon extends StatelessWidget {
               child: Text(
                 letter,
                 style: TextStyle(
-                  fontSize: size * 0.44,
+                  fontSize: size * 0.50,
                   fontWeight: FontWeight.w900,
                   color: const Color(0xFF0F172A),
                   height: 1.0,
@@ -267,7 +298,7 @@ class _BusinessTypeIcon extends StatelessWidget {
                   child: Text(
                     letter,
                     style: TextStyle(
-                      fontSize: size * 0.44,
+                      fontSize: size * 0.50,
                       fontWeight: FontWeight.w900,
                       color: const Color(0xFF0F172A),
                       height: 1.0,
