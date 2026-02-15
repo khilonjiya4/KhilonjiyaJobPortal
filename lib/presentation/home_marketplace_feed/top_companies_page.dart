@@ -16,9 +16,15 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
   final JobSeekerHomeService _service = JobSeekerHomeService();
 
   final TextEditingController _searchCtrl = TextEditingController();
+  final ScrollController _scrollCtrl = ScrollController();
 
   bool _loading = true;
+  bool _loadingMore = false;
   bool _disposed = false;
+
+  int _offset = 0;
+  final int _limit = 20;
+  bool _hasMore = true;
 
   List<Map<String, dynamic>> _companies = [];
   List<Map<String, dynamic>> _filtered = [];
@@ -26,52 +32,133 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
   @override
   void initState() {
     super.initState();
-    _load();
+
+    _loadInitial();
+
     _searchCtrl.addListener(_applySearch);
+    _scrollCtrl.addListener(_onScroll);
   }
 
   @override
   void dispose() {
     _disposed = true;
+
     _searchCtrl.removeListener(_applySearch);
+    _scrollCtrl.removeListener(_onScroll);
+
     _searchCtrl.dispose();
+    _scrollCtrl.dispose();
+
     super.dispose();
   }
 
-  Future<void> _load() async {
-    if (!_disposed) setState(() => _loading = true);
+  // ============================================================
+  // LOAD INITIAL
+  // ============================================================
+  Future<void> _loadInitial() async {
+    if (!_disposed) {
+      setState(() {
+        _loading = true;
+        _companies = [];
+        _filtered = [];
+        _offset = 0;
+        _hasMore = true;
+      });
+    }
 
     try {
-      final list = await _service.fetchTopCompanies(limit: 80);
+      final list = await _service.fetchTopCompaniesPaginated(
+        offset: _offset,
+        limit: _limit,
+      );
 
       _companies = list;
-      _filtered = list;
+      _applySearch(); // also sets _filtered
+
+      _offset += list.length;
+      _hasMore = list.length == _limit;
     } catch (_) {
       _companies = [];
       _filtered = [];
+      _hasMore = false;
     }
 
     if (_disposed) return;
     setState(() => _loading = false);
   }
 
+  // ============================================================
+  // LOAD MORE
+  // ============================================================
+  Future<void> _loadMore() async {
+    if (_loadingMore) return;
+    if (!_hasMore) return;
+    if (_loading) return;
+
+    setState(() => _loadingMore = true);
+
+    try {
+      final list = await _service.fetchTopCompaniesPaginated(
+        offset: _offset,
+        limit: _limit,
+      );
+
+      if (list.isNotEmpty) {
+        _companies.addAll(list);
+      }
+
+      _offset += list.length;
+      _hasMore = list.length == _limit;
+
+      _applySearch();
+    } catch (_) {
+      _hasMore = false;
+    }
+
+    if (_disposed) return;
+    setState(() => _loadingMore = false);
+  }
+
+  void _onScroll() {
+    if (!_scrollCtrl.hasClients) return;
+
+    final pos = _scrollCtrl.position;
+
+    // load when 250px near bottom
+    if (pos.pixels >= pos.maxScrollExtent - 250) {
+      _loadMore();
+    }
+  }
+
+  // ============================================================
+  // SEARCH
+  // ============================================================
   void _applySearch() {
     final q = _searchCtrl.text.trim().toLowerCase();
 
     if (q.isEmpty) {
-      if (!_disposed) setState(() => _filtered = _companies);
+      if (!_disposed) setState(() => _filtered = List.from(_companies));
       return;
     }
 
     final out = _companies.where((c) {
       final name = (c['name'] ?? '').toString().toLowerCase();
-      final industry = (c['industry'] ?? '').toString().toLowerCase();
-      return name.contains(q) || industry.contains(q);
+
+      // Option A business type
+      final bt = c['business_types_master'];
+      final businessType = (bt is Map<String, dynamic>)
+          ? (bt['type_name'] ?? '').toString().toLowerCase()
+          : '';
+
+      return name.contains(q) || businessType.contains(q);
     }).toList();
 
     if (!_disposed) setState(() => _filtered = out);
   }
 
+  // ============================================================
+  // UI
+  // ============================================================
   Widget _searchBar() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
@@ -156,25 +243,45 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
     );
   }
 
-  Widget _grid() {
+  Widget _list() {
     return RefreshIndicator(
-      onRefresh: _load,
-      child: GridView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-        itemCount: _filtered.length,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: 1.55, // IMPORTANT (Axis style)
-        ),
+      onRefresh: _loadInitial,
+      child: ListView.builder(
+        controller: _scrollCtrl,
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+        itemCount: _filtered.length + 1,
         itemBuilder: (_, i) {
+          // last loader
+          if (i == _filtered.length) {
+            if (_loadingMore) {
+              return Padding(
+                padding: const EdgeInsets.only(top: 14),
+                child: Center(
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.6,
+                      color: KhilonjiyaUI.primary.withOpacity(0.7),
+                    ),
+                  ),
+                ),
+              );
+            }
+
+            if (!_hasMore) {
+              return const SizedBox(height: 30);
+            }
+
+            return const SizedBox(height: 30);
+          }
+
           final c = _filtered[i];
 
           return CompanyCard(
             company: c,
             onTap: () {
-              // Later: open company details page
+              // later: open company details page
             },
           );
         },
@@ -182,6 +289,9 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
     );
   }
 
+  // ============================================================
+  // BUILD
+  // ============================================================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -209,7 +319,7 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
                     ),
                   ),
                   IconButton(
-                    onPressed: _load,
+                    onPressed: _loadInitial,
                     icon: const Icon(Icons.refresh_rounded),
                   ),
                 ],
@@ -221,7 +331,7 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
-                  : (_filtered.isEmpty ? _empty() : _grid()),
+                  : (_filtered.isEmpty ? _empty() : _list()),
             ),
           ],
         ),
