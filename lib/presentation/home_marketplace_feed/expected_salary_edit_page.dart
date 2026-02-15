@@ -18,39 +18,62 @@ class ExpectedSalaryEditPage extends StatefulWidget {
 }
 
 class _ExpectedSalaryEditPageState extends State<ExpectedSalaryEditPage> {
-  final JobSeekerHomeService _homeService = JobSeekerHomeService();
-
-  final TextEditingController _controller = TextEditingController();
+  final JobSeekerHomeService _service = JobSeekerHomeService();
 
   bool _saving = false;
+
+  late final TextEditingController _ctrl;
 
   @override
   void initState() {
     super.initState();
-    _controller.text =
-        widget.initialSalaryPerMonth > 0 ? widget.initialSalaryPerMonth.toString() : '';
+    _ctrl = TextEditingController(
+      text: widget.initialSalaryPerMonth <= 0
+          ? ''
+          : widget.initialSalaryPerMonth.toString(),
+    );
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _ctrl.dispose();
     super.dispose();
   }
 
-  int _parseSalary() {
-    final raw = _controller.text.trim().replaceAll(',', '');
-    if (raw.isEmpty) return 0;
-    return int.tryParse(raw) ?? 0;
+  InputDecoration _dec(String hint) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: KhilonjiyaUI.sub,
+      prefixIcon: const Icon(Icons.currency_rupee_rounded),
+      filled: true,
+      fillColor: const Color(0xFFF8FAFC),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide(color: KhilonjiyaUI.border),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide(color: KhilonjiyaUI.border),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide(
+          color: KhilonjiyaUI.primary.withOpacity(0.6),
+          width: 1.4,
+        ),
+      ),
+    );
   }
 
   Future<void> _save() async {
     if (_saving) return;
 
-    final salary = _parseSalary();
+    final raw = _ctrl.text.trim();
+    final v = int.tryParse(raw) ?? 0;
 
-    if (salary <= 0) {
+    if (v <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Enter a valid monthly salary")),
+        const SnackBar(content: Text("Please enter a valid salary amount")),
       );
       return;
     }
@@ -58,17 +81,18 @@ class _ExpectedSalaryEditPageState extends State<ExpectedSalaryEditPage> {
     setState(() => _saving = true);
 
     try {
-      await _homeService.updateExpectedSalaryPerMonth(salary);
+      await _service.updateExpectedSalaryPerMonth(v);
 
       if (!mounted) return;
-      Navigator.pop(context, salary);
+
+      // return salary to previous page
+      Navigator.pop(context, v);
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Failed to save. Try again.")),
+        const SnackBar(content: Text("Failed to update expected salary")),
       );
-    } finally {
-      if (mounted) setState(() => _saving = false);
+      setState(() => _saving = false);
     }
   }
 
@@ -76,88 +100,126 @@ class _ExpectedSalaryEditPageState extends State<ExpectedSalaryEditPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: KhilonjiyaUI.bg,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        surfaceTintColor: Colors.white,
-        titleSpacing: 0,
-        title: Text(
-          "Expected salary (monthly)",
-          style: KhilonjiyaUI.h2.copyWith(
-            fontSize: 16,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-        children: [
-          Container(
-            decoration: KhilonjiyaUI.cardDecoration(radius: 16),
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  "Enter salary per month (INR)",
-                  style: KhilonjiyaUI.cardTitle,
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _controller,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    hintText: "Example: 25000",
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide(color: KhilonjiyaUI.border),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide(color: KhilonjiyaUI.border),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: const BorderSide(
-                        color: KhilonjiyaUI.primary,
-                        width: 1.2,
-                      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Top bar
+            Container(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border(bottom: BorderSide(color: KhilonjiyaUI.border)),
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.arrow_back_rounded),
+                  ),
+                  const SizedBox(width: 2),
+                  Expanded(
+                    child: Text(
+                      "Expected salary",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: KhilonjiyaUI.hTitle,
                     ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    onPressed: _saving ? null : _save,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: KhilonjiyaUI.primary,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    child: _saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text(
-                            "Save",
-                            style: TextStyle(
-                              fontWeight: FontWeight.w900,
-                              fontSize: 15,
-                            ),
-                          ),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 30),
+                children: [
+                  Container(
+                    decoration: KhilonjiyaUI.cardDecoration(radius: 22),
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 54,
+                          height: 54,
+                          decoration: BoxDecoration(
+                            color: KhilonjiyaUI.primary.withOpacity(0.10),
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: const Icon(
+                            Icons.currency_rupee_rounded,
+                            color: KhilonjiyaUI.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "Set expected salary",
+                                style: KhilonjiyaUI.hTitle,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                "We will show jobs with salary equal to or higher than this.",
+                                style: KhilonjiyaUI.sub,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  Text(
+                    "Expected salary per month",
+                    style: KhilonjiyaUI.cardTitle.copyWith(fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+
+                  TextField(
+                    controller: _ctrl,
+                    keyboardType: TextInputType.number,
+                    style: KhilonjiyaUI.body.copyWith(fontWeight: FontWeight.w900),
+                    decoration: _dec("Example: 15000"),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: ElevatedButton(
+                      onPressed: _saving ? null : _save,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: KhilonjiyaUI.primary,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                      child: _saving
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.6,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text(
+                              "Save",
+                              style: TextStyle(fontWeight: FontWeight.w900),
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
