@@ -1,3 +1,5 @@
+// File: lib/services/job_seeker_home_service.dart
+
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -77,18 +79,12 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // JOBS NEARBY
+  // JOBS NEARBY (fallback)
   // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchJobsNearby({
     int limit = 40,
   }) async {
-    // NOTE:
-    // Real nearby needs:
-    // - user location saved in profile (lat/lng)
-    // - PostGIS + RPC function for distance
-    //
-    // For now fallback so UI works.
     return fetchJobs(limit: limit);
   }
 
@@ -116,29 +112,32 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // RECOMMENDED JOBS (job_recommendations table)
+  // COMPANY JOBS
   // ============================================================
 
+  Future<List<Map<String, dynamic>>> fetchCompanyJobs({
+    required String companyId,
+    int limit = 50,
+  }) async {
+    _ensureAuthenticatedSync();
 
-Future<List<Map<String, dynamic>>> fetchCompanyJobs({
-  required String companyId,
-  int limit = 50,
-}) async {
-  _ensureAuthenticatedSync();
+    final nowIso = DateTime.now().toIso8601String();
 
-  final nowIso = DateTime.now().toIso8601String();
+    final res = await _db
+        .from('job_listings')
+        .select(_jobWithCompanySelect)
+        .eq('status', 'active')
+        .eq('company_id', companyId)
+        .gte('expires_at', nowIso)
+        .order('created_at', ascending: false)
+        .limit(limit);
 
-  final res = await _db
-      .from('job_listings')
-      .select(_jobWithCompanySelect)
-      .eq('status', 'active')
-      .eq('company_id', companyId)
-      .gte('expires_at', nowIso)
-      .order('created_at', ascending: false)
-      .limit(limit);
+    return List<Map<String, dynamic>>.from(res);
+  }
 
-  return List<Map<String, dynamic>>.from(res);
-}
+  // ============================================================
+  // RECOMMENDED JOBS
+  // ============================================================
 
   Future<List<Map<String, dynamic>>> getRecommendedJobs({
     int limit = 40,
@@ -223,7 +222,7 @@ Future<List<Map<String, dynamic>>> fetchCompanyJobs({
         'device_type': 'mobile',
       });
 
-      // Optional activity log
+      // activity log (schema allows: viewed, applied, saved, shared)
       try {
         await _db.from('user_job_activity').insert({
           'user_id': userId,
@@ -294,6 +293,11 @@ Future<List<Map<String, dynamic>>> fetchCompanyJobs({
   // ============================================================
   // JOBS FILTERED BY SALARY (MONTHLY)
   // ============================================================
+  // IMPORTANT FIX:
+  // - do NOT hard-require salary_period == Monthly
+  //   because many rows may have NULL or different casing
+  // - still filter by salary_max >= minSalary
+  // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchJobsByMinSalaryMonthly({
     required int minMonthlySalary,
@@ -304,12 +308,15 @@ Future<List<Map<String, dynamic>>> fetchCompanyJobs({
     final nowIso = DateTime.now().toIso8601String();
     final minSalary = minMonthlySalary < 0 ? 0 : minMonthlySalary;
 
+    // Prefer monthly jobs, but allow null salary_period too.
+    // Supabase OR syntax:
+    // .or('salary_period.eq.Monthly,salary_period.is.null')
     final res = await _db
         .from('job_listings')
         .select(_jobWithCompanySelect)
         .eq('status', 'active')
         .gte('expires_at', nowIso)
-        .eq('salary_period', 'Monthly')
+        .or('salary_period.eq.Monthly,salary_period.is.null')
         .gte('salary_max', minSalary)
         .order('salary_max', ascending: false)
         .limit(limit);
@@ -372,16 +379,9 @@ Future<List<Map<String, dynamic>>> fetchCompanyJobs({
           .eq('user_id', userId)
           .eq('job_id', jobId);
 
-      // activity log: UNSAVED
-      try {
-        await _db.from('user_job_activity').insert({
-          'user_id': userId,
-          'job_id': jobId,
-          'activity_type': 'unsaved',
-          'activity_date': DateTime.now().toIso8601String(),
-        });
-      } catch (_) {}
-
+      // IMPORTANT:
+      // Your schema does NOT allow "unsaved"
+      // activity_type only: viewed, applied, saved, shared
       return false;
     }
 
@@ -424,7 +424,7 @@ Future<List<Map<String, dynamic>>> fetchCompanyJobs({
   }
 
   // ============================================================
-  // APPLIED JOBS (MY JOBS PAGE)
+  // APPLIED JOBS
   // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchAppliedJobs({
@@ -559,6 +559,8 @@ Future<List<Map<String, dynamic>>> fetchCompanyJobs({
     final userId = _userId();
 
     try {
+      tellDebug("Loading expected salary for user: $userId");
+
       final profile = await _db
           .from('user_profiles')
           .select('expected_salary_min')
@@ -595,6 +597,12 @@ Future<List<Map<String, dynamic>>> fetchCompanyJobs({
   // ============================================================
   // PROFILE (EDIT PAGE)
   // ============================================================
+  // IMPORTANT FIXES (schema aligned):
+  // - phone -> mobile_number
+  // - location_text -> location
+  // - preferred_job_type -> preferred_job_types (array)
+  // - preferred_employment_type does NOT exist -> ignore
+  // ============================================================
 
   Future<Map<String, dynamic>> fetchMyProfile() async {
     _ensureAuthenticatedSync();
@@ -605,10 +613,10 @@ Future<List<Map<String, dynamic>>> fetchCompanyJobs({
         .select('''
           id,
           full_name,
-          phone,
+          mobile_number,
           current_city,
           current_state,
-          location_text,
+          location,
           bio,
           skills,
           highest_education,
@@ -616,8 +624,8 @@ Future<List<Map<String, dynamic>>> fetchCompanyJobs({
           expected_salary_min,
           expected_salary_max,
           notice_period_days,
-          preferred_job_type,
-          preferred_employment_type,
+          preferred_job_types,
+          preferred_locations,
           profile_completion_percentage,
           last_profile_update
         ''')
@@ -645,7 +653,7 @@ Future<List<Map<String, dynamic>>> fetchCompanyJobs({
     // 10 key fields => 100%
     final fields = [
       'full_name',
-      'phone',
+      'mobile_number',
       'current_city',
       'current_state',
       'highest_education',
@@ -653,7 +661,7 @@ Future<List<Map<String, dynamic>>> fetchCompanyJobs({
       'expected_salary_min',
       'skills',
       'bio',
-      'preferred_job_type',
+      'preferred_job_types',
     ];
 
     int filled = 0;
@@ -685,25 +693,26 @@ Future<List<Map<String, dynamic>>> fetchCompanyJobs({
   }
 
   // ============================================================
-  // TOP COMPANIES  ✅ UPDATED (REAL)
+  // TOP COMPANIES (REAL)
   // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchTopCompanies({
-  int limit = 8,
-}) async {
-  _ensureAuthenticatedSync();
+    int limit = 8,
+  }) async {
+    _ensureAuthenticatedSync();
 
-  // This uses the SQL VIEW (companies_with_stats)
-  final res = await _db
-      .from('companies_with_stats')
-      .select(
-        'id, name, slug, logo_url, industry, company_size, is_verified, total_jobs',
-      )
-      .order('total_jobs', ascending: false)
-      .limit(limit);
+    // SQL VIEW: companies_with_stats
+    final res = await _db
+        .from('companies_with_stats')
+        .select(
+          'id, name, slug, logo_url, industry, company_size, is_verified, total_jobs',
+        )
+        .order('total_jobs', ascending: false)
+        .limit(limit);
 
-  return List<Map<String, dynamic>>.from(res);
-}
+    return List<Map<String, dynamic>>.from(res);
+  }
+
   // ============================================================
   // FOLLOW COMPANY
   // ============================================================
@@ -832,6 +841,10 @@ Future<List<Map<String, dynamic>>> fetchCompanyJobs({
   // ============================================================
   // HELPERS
   // ============================================================
+
+  void tellDebug(String msg) {
+    if (kDebugMode) debugPrint(msg);
+  }
 
   int _toInt(dynamic v) {
     if (v == null) return 0;
