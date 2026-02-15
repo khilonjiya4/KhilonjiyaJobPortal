@@ -1,3 +1,5 @@
+// File: lib/presentation/home_marketplace_feed/top_companies_page.dart
+
 import 'package:flutter/material.dart';
 
 import '../../core/ui/khilonjiya_ui.dart';
@@ -16,15 +18,9 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
   final JobSeekerHomeService _service = JobSeekerHomeService();
 
   final TextEditingController _searchCtrl = TextEditingController();
-  final ScrollController _scrollCtrl = ScrollController();
 
   bool _loading = true;
-  bool _loadingMore = false;
   bool _disposed = false;
-
-  int _offset = 0;
-  final int _limit = 20;
-  bool _hasMore = true;
 
   List<Map<String, dynamic>> _companies = [];
   List<Map<String, dynamic>> _filtered = [];
@@ -32,102 +28,38 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
   @override
   void initState() {
     super.initState();
-
-    _loadInitial();
-
+    _load();
     _searchCtrl.addListener(_applySearch);
-    _scrollCtrl.addListener(_onScroll);
   }
 
   @override
   void dispose() {
     _disposed = true;
-
     _searchCtrl.removeListener(_applySearch);
-    _scrollCtrl.removeListener(_onScroll);
-
     _searchCtrl.dispose();
-    _scrollCtrl.dispose();
-
     super.dispose();
   }
 
   // ============================================================
-  // LOAD INITIAL
+  // LOAD
   // ============================================================
-  Future<void> _loadInitial() async {
-    if (!_disposed) {
-      setState(() {
-        _loading = true;
-        _companies = [];
-        _filtered = [];
-        _offset = 0;
-        _hasMore = true;
-      });
-    }
+  Future<void> _load() async {
+    if (!_disposed) setState(() => _loading = true);
 
     try {
-      final list = await _service.fetchTopCompaniesPaginated(
-        offset: _offset,
-        limit: _limit,
-      );
+      // IMPORTANT:
+      // This method exists already in your service
+      final list = await _service.fetchTopCompanies(limit: 80);
 
       _companies = list;
-      _applySearch(); // also sets _filtered
-
-      _offset += list.length;
-      _hasMore = list.length == _limit;
+      _filtered = list;
     } catch (_) {
       _companies = [];
       _filtered = [];
-      _hasMore = false;
     }
 
     if (_disposed) return;
     setState(() => _loading = false);
-  }
-
-  // ============================================================
-  // LOAD MORE
-  // ============================================================
-  Future<void> _loadMore() async {
-    if (_loadingMore) return;
-    if (!_hasMore) return;
-    if (_loading) return;
-
-    setState(() => _loadingMore = true);
-
-    try {
-      final list = await _service.fetchTopCompaniesPaginated(
-        offset: _offset,
-        limit: _limit,
-      );
-
-      if (list.isNotEmpty) {
-        _companies.addAll(list);
-      }
-
-      _offset += list.length;
-      _hasMore = list.length == _limit;
-
-      _applySearch();
-    } catch (_) {
-      _hasMore = false;
-    }
-
-    if (_disposed) return;
-    setState(() => _loadingMore = false);
-  }
-
-  void _onScroll() {
-    if (!_scrollCtrl.hasClients) return;
-
-    final pos = _scrollCtrl.position;
-
-    // load when 250px near bottom
-    if (pos.pixels >= pos.maxScrollExtent - 250) {
-      _loadMore();
-    }
   }
 
   // ============================================================
@@ -245,43 +177,17 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
 
   Widget _list() {
     return RefreshIndicator(
-      onRefresh: _loadInitial,
+      onRefresh: _load,
       child: ListView.builder(
-        controller: _scrollCtrl,
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
-        itemCount: _filtered.length + 1,
+        itemCount: _filtered.length,
         itemBuilder: (_, i) {
-          // last loader
-          if (i == _filtered.length) {
-            if (_loadingMore) {
-              return Padding(
-                padding: const EdgeInsets.only(top: 14),
-                child: Center(
-                  child: SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.6,
-                      color: KhilonjiyaUI.primary.withOpacity(0.7),
-                    ),
-                  ),
-                ),
-              );
-            }
-
-            if (!_hasMore) {
-              return const SizedBox(height: 30);
-            }
-
-            return const SizedBox(height: 30);
-          }
-
           final c = _filtered[i];
 
           return CompanyCard(
             company: c,
             onTap: () {
-              // later: open company details page
+              // Later: open company details page
             },
           );
         },
@@ -319,7 +225,7 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
                     ),
                   ),
                   IconButton(
-                    onPressed: _loadInitial,
+                    onPressed: _load,
                     icon: const Icon(Icons.refresh_rounded),
                   ),
                 ],
