@@ -222,7 +222,7 @@ class JobSeekerHomeService {
         'device_type': 'mobile',
       });
 
-      // activity log (schema allows: viewed, applied, saved, shared)
+      // activity log
       try {
         await _db.from('user_job_activity').insert({
           'user_id': userId,
@@ -293,11 +293,6 @@ class JobSeekerHomeService {
   // ============================================================
   // JOBS FILTERED BY SALARY (MONTHLY)
   // ============================================================
-  // IMPORTANT FIX:
-  // - do NOT hard-require salary_period == Monthly
-  //   because many rows may have NULL or different casing
-  // - still filter by salary_max >= minSalary
-  // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchJobsByMinSalaryMonthly({
     required int minMonthlySalary,
@@ -308,15 +303,20 @@ class JobSeekerHomeService {
     final nowIso = DateTime.now().toIso8601String();
     final minSalary = minMonthlySalary < 0 ? 0 : minMonthlySalary;
 
-    // Prefer monthly jobs, but allow null salary_period too.
-    // Supabase OR syntax:
-    // .or('salary_period.eq.Monthly,salary_period.is.null')
+    // IMPORTANT:
+    // Many rows may have salary_period = null or "monthly" (lowercase).
+    // So we do NOT hard force salary_period == Monthly.
+    //
+    // We accept:
+    // - salary_period is null
+    // - salary_period == Monthly
+    // - salary_period == monthly
     final res = await _db
         .from('job_listings')
         .select(_jobWithCompanySelect)
         .eq('status', 'active')
         .gte('expires_at', nowIso)
-        .or('salary_period.eq.Monthly,salary_period.is.null')
+        .or('salary_period.is.null,salary_period.eq.Monthly,salary_period.eq.monthly')
         .gte('salary_max', minSalary)
         .order('salary_max', ascending: false)
         .limit(limit);
@@ -352,7 +352,6 @@ class JobSeekerHomeService {
         .eq('user_id', userId)
         .order('saved_at', ascending: false);
 
-    // each row = { job_listings: {...} }
     return res.map<Map<String, dynamic>>((e) {
       final j = e['job_listings'];
       if (j is Map<String, dynamic>) return j;
@@ -379,9 +378,6 @@ class JobSeekerHomeService {
           .eq('user_id', userId)
           .eq('job_id', jobId);
 
-      // IMPORTANT:
-      // Your schema does NOT allow "unsaved"
-      // activity_type only: viewed, applied, saved, shared
       return false;
     }
 
@@ -391,7 +387,6 @@ class JobSeekerHomeService {
       'saved_at': DateTime.now().toIso8601String(),
     });
 
-    // activity log: SAVED
     try {
       await _db.from('user_job_activity').insert({
         'user_id': userId,
@@ -457,11 +452,9 @@ class JobSeekerHomeService {
 
       final job = Map<String, dynamic>.from(j);
 
-      // Attach application info for UI
       job['applied_at'] = r['applied_at'];
       job['application_status'] = r['application_status'];
 
-      // Only show valid jobs
       final status = (job['status'] ?? '').toString();
       final expiresAt = (job['expires_at'] ?? '').toString();
 
@@ -559,8 +552,6 @@ class JobSeekerHomeService {
     final userId = _userId();
 
     try {
-      tellDebug("Loading expected salary for user: $userId");
-
       final profile = await _db
           .from('user_profiles')
           .select('expected_salary_min')
@@ -595,13 +586,7 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // PROFILE (EDIT PAGE)
-  // ============================================================
-  // IMPORTANT FIXES (schema aligned):
-  // - phone -> mobile_number
-  // - location_text -> location
-  // - preferred_job_type -> preferred_job_types (array)
-  // - preferred_employment_type does NOT exist -> ignore
+  // PROFILE (EDIT PAGE) - IMPORTANT FIX
   // ============================================================
 
   Future<Map<String, dynamic>> fetchMyProfile() async {
@@ -625,7 +610,6 @@ class JobSeekerHomeService {
           expected_salary_max,
           notice_period_days,
           preferred_job_types,
-          preferred_locations,
           profile_completion_percentage,
           last_profile_update
         ''')
@@ -633,24 +617,94 @@ class JobSeekerHomeService {
         .maybeSingle();
 
     if (res == null) return {};
-    return Map<String, dynamic>.from(res);
+
+    // IMPORTANT:
+    // Your ProfileEditPage expects:
+    // phone, location_text, preferred_job_type, preferred_employment_type
+    // So we map values to those keys.
+
+    final p = Map<String, dynamic>.from(res);
+
+    return {
+      ...p,
+
+      // mapping keys for UI
+      'phone': p['mobile_number'],
+      'location_text': p['location'],
+
+      // preferred_job_type UI expects string
+      'preferred_job_type': _preferredJobTypeString(p['preferred_job_types']),
+
+      // you don't have this column; keep for UI
+      'preferred_employment_type': 'Any',
+    };
   }
 
   Future<void> updateMyProfile(Map<String, dynamic> payload) async {
     _ensureAuthenticatedSync();
     final userId = _userId();
 
-    final completion = _calculateProfileCompletion(payload);
+    // payload is coming from ProfileEditPage (wrong schema keys)
+    // Convert it to your DB schema.
+
+    final mapped = <String, dynamic>{};
+
+    mapped['full_name'] = (payload['full_name'] ?? '').toString().trim();
+    mapped['mobile_number'] = (payload['phone'] ?? '').toString().trim();
+
+    mapped['current_city'] = (payload['current_city'] ?? '').toString().trim();
+    mapped['current_state'] =
+        (payload['current_state'] ?? '').toString().trim();
+
+    mapped['location'] = (payload['location_text'] ?? '').toString().trim();
+
+    mapped['bio'] = (payload['bio'] ?? '').toString().trim();
+
+    // skills is already list
+    mapped['skills'] = payload['skills'] ?? [];
+
+    mapped['highest_education'] =
+        (payload['highest_education'] ?? '').toString().trim();
+
+    mapped['total_experience_years'] = _toInt(payload['total_experience_years']);
+
+    final expectedSalaryMin = _toInt(payload['expected_salary_min']);
+    mapped['expected_salary_min'] = expectedSalaryMin < 0 ? 0 : expectedSalaryMin;
+    mapped['expected_salary_max'] =
+        (expectedSalaryMin < 0 ? 0 : expectedSalaryMin) + 5000;
+
+    mapped['notice_period_days'] = _toInt(payload['notice_period_days']);
+
+    // preferred_job_type is string in UI -> DB wants array
+    final jt = (payload['preferred_job_type'] ?? 'Any').toString();
+    mapped['preferred_job_types'] = _preferredJobTypesArray(jt);
+
+    // completion
+    final completion = _calculateProfileCompletion(mapped);
 
     await _db.from('user_profiles').update({
-      ...payload,
+      ...mapped,
       'profile_completion_percentage': completion,
       'last_profile_update': DateTime.now().toIso8601String(),
     }).eq('id', userId);
   }
 
+  String _preferredJobTypeString(dynamic raw) {
+    if (raw == null) return 'Any';
+    if (raw is List) {
+      if (raw.isEmpty) return 'Any';
+      return raw.first.toString();
+    }
+    return raw.toString();
+  }
+
+  List<String> _preferredJobTypesArray(String jobType) {
+    final v = jobType.trim();
+    if (v.isEmpty || v.toLowerCase() == 'any') return [];
+    return [v];
+  }
+
   int _calculateProfileCompletion(Map<String, dynamic> p) {
-    // 10 key fields => 100%
     final fields = [
       'full_name',
       'mobile_number',
@@ -693,7 +747,7 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // TOP COMPANIES (REAL)
+  // TOP COMPANIES
   // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchTopCompanies({
@@ -701,7 +755,6 @@ class JobSeekerHomeService {
   }) async {
     _ensureAuthenticatedSync();
 
-    // SQL VIEW: companies_with_stats
     final res = await _db
         .from('companies_with_stats')
         .select(
@@ -714,95 +767,8 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // FOLLOW COMPANY
-  // ============================================================
-
-  Future<bool> isCompanyFollowed(String companyId) async {
-    _ensureAuthenticatedSync();
-
-    final userId = _userId();
-
-    final res = await _db
-        .from('followed_companies')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('company_id', companyId)
-        .maybeSingle();
-
-    return res != null;
-  }
-
-  Future<bool> toggleFollowCompany(String companyId) async {
-    _ensureAuthenticatedSync();
-
-    final userId = _userId();
-
-    final existing = await _db
-        .from('followed_companies')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('company_id', companyId)
-        .maybeSingle();
-
-    if (existing != null) {
-      await _db
-          .from('followed_companies')
-          .delete()
-          .eq('user_id', userId)
-          .eq('company_id', companyId);
-
-      return false;
-    }
-
-    await _db.from('followed_companies').insert({
-      'user_id': userId,
-      'company_id': companyId,
-      'followed_at': DateTime.now().toIso8601String(),
-    });
-
-    return true;
-  }
-
-  // ============================================================
-  // COMPANY REVIEWS
-  // ============================================================
-
-  Future<List<Map<String, dynamic>>> fetchCompanyReviews({
-    required String companyId,
-    int limit = 20,
-  }) async {
-    _ensureAuthenticatedSync();
-
-    final res = await _db
-        .from('company_reviews')
-        .select('id, rating, review_text, created_at, is_anonymous')
-        .eq('company_id', companyId)
-        .order('created_at', ascending: false)
-        .limit(limit);
-
-    return List<Map<String, dynamic>>.from(res);
-  }
-
-  // ============================================================
   // NOTIFICATIONS
   // ============================================================
-
-  Future<List<Map<String, dynamic>>> fetchNotifications({
-    int limit = 40,
-  }) async {
-    _ensureAuthenticatedSync();
-
-    final userId = _userId();
-
-    final res = await _db
-        .from('notifications')
-        .select('id, type, title, body, data, is_read, created_at')
-        .eq('user_id', userId)
-        .order('created_at', ascending: false)
-        .limit(limit);
-
-    return List<Map<String, dynamic>>.from(res);
-  }
 
   Future<int> getUnreadNotificationsCount() async {
     _ensureAuthenticatedSync();
@@ -816,26 +782,6 @@ class JobSeekerHomeService {
         .eq('is_read', false);
 
     return (res as List).length;
-  }
-
-  Future<void> markNotificationRead(String notificationId) async {
-    _ensureAuthenticatedSync();
-
-    await _db
-        .from('notifications')
-        .update({'is_read': true}).eq('id', notificationId);
-  }
-
-  Future<void> markAllNotificationsRead() async {
-    _ensureAuthenticatedSync();
-
-    final userId = _userId();
-
-    await _db
-        .from('notifications')
-        .update({'is_read': true})
-        .eq('user_id', userId)
-        .eq('is_read', false);
   }
 
   // ============================================================
