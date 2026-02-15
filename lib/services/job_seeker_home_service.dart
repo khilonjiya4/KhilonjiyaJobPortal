@@ -25,9 +25,15 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // COMMON SELECT (Job + Company)
+  // COMMON SELECT (Job + Company + Business Type)
   // ============================================================
 
+  /// IMPORTANT:
+  /// This now includes:
+  /// - companies.business_type_id
+  /// - companies.business_types_master (type_name, logo_url)
+  ///
+  /// So UI can show the business type logo.
   String get _jobWithCompanySelect => '''
     *,
     companies (
@@ -41,7 +47,14 @@ class JobSeekerHomeService {
       total_reviews,
       company_size,
       description,
-      website
+      website,
+
+      business_type_id,
+      business_types_master (
+        id,
+        type_name,
+        logo_url
+      )
     )
   ''';
 
@@ -278,7 +291,30 @@ class JobSeekerHomeService {
     final res = await _db
         .from('companies')
         .select(
-          'id, name, slug, logo_url, website, description, industry, company_size, founded_year, headquarters_city, headquarters_state, rating, total_reviews, total_jobs, is_verified',
+          '''
+          id,
+          name,
+          slug,
+          logo_url,
+          website,
+          description,
+          industry,
+          company_size,
+          founded_year,
+          headquarters_city,
+          headquarters_state,
+          rating,
+          total_reviews,
+          total_jobs,
+          is_verified,
+
+          business_type_id,
+          business_types_master (
+            id,
+            type_name,
+            logo_url
+          )
+        ''',
         )
         .eq('id', companyId)
         .maybeSingle();
@@ -288,7 +324,7 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // ✅ FOLLOW COMPANY (MISSING FIX)
+  // ✅ FOLLOW COMPANY
   // ============================================================
 
   Future<bool> isCompanyFollowed(String companyId) async {
@@ -338,7 +374,7 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // ✅ COMPANY REVIEWS (MISSING FIX)
+  // ✅ COMPANY REVIEWS
   // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchCompanyReviews({
@@ -647,7 +683,7 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // PROFILE (EDIT PAGE) - IMPORTANT FIX
+  // PROFILE
   // ============================================================
 
   Future<Map<String, dynamic>> fetchMyProfile() async {
