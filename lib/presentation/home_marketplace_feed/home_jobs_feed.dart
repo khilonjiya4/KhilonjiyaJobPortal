@@ -24,6 +24,8 @@ import 'jobs_by_salary_page.dart';
 import 'latest_jobs_page.dart';
 import 'jobs_nearby_page.dart';
 
+import 'construction_services_home_page.dart'; // ✅ ADDED
+
 import 'widgets/naukri_drawer.dart';
 
 import 'widgets/home_sections/ai_banner_card.dart';
@@ -498,11 +500,19 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
         ),
         const SizedBox(height: 14),
 
+        // ✅ BOOST CARD NAVIGATION FIXED
         BoostCard(
           label: "Construction",
           title: "Khilonjiya Construction Service",
           subtitle: "Your trusted construction partner",
-          onTap: () {},
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const ConstructionServicesHomePage(),
+              ),
+            );
+          },
         ),
         const SizedBox(height: 14),
 
@@ -604,7 +614,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
         const SizedBox(height: 18),
 
         // ------------------------------------------------------------
-        // TOP COMPANIES (VERTICAL - SAME AS JOB CARDS)
+        // TOP COMPANIES (VERTICAL)
         // ------------------------------------------------------------
         SectionHeader(
           title: "Top companies",
