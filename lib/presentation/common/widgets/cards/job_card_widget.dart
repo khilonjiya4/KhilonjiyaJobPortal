@@ -1,6 +1,3 @@
-// File: lib/presentation/common/widgets/cards/job_card_widget.dart
-
-import 'dart:math';
 import 'package:flutter/material.dart';
 import '../../../../core/ui/khilonjiya_ui.dart';
 
@@ -10,12 +7,18 @@ class JobCardWidget extends StatelessWidget {
   final VoidCallback onSaveToggle;
   final VoidCallback onTap;
 
+  /// NEW (passed from parent for now)
+  final String businessType;
+  final String? businessIconUrl;
+
   const JobCardWidget({
     Key? key,
     required this.job,
     required this.isSaved,
     required this.onSaveToggle,
     required this.onTap,
+    required this.businessType,
+    this.businessIconUrl,
   }) : super(key: key);
 
   @override
@@ -25,7 +28,6 @@ class JobCardWidget extends StatelessWidget {
     // ------------------------------------------------------------
     final title = (job['job_title'] ?? job['title'] ?? 'Job').toString().trim();
 
-    // Prefer joined companies.name if present
     final companyMap = job['companies'];
     final companyName = (companyMap is Map<String, dynamic>)
         ? (companyMap['name'] ?? '').toString().trim()
@@ -86,50 +88,57 @@ class JobCardWidget extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ============================================================
-            // HEADER ROW (LOGO + TITLE + COMPANY + SAVE)
+            // HEADER ROW (TITLE + COMPANY + RIGHT ICON + SAVE)
             // ============================================================
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _CompanyLetterLogo(company: company, size: 52),
-                const SizedBox(width: 12),
-
+                // LEFT TEXT BLOCK
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // JOB TITLE (1 LINE)
+                      // JOB TITLE (BIGGEST)
                       Text(
                         title.isEmpty ? "Job" : title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: KhilonjiyaUI.cardTitle.copyWith(
-                          fontSize: 15.2,
+                          fontSize: 16.6,
                           fontWeight: FontWeight.w900,
-                          height: 1.15,
+                          height: 1.12,
                         ),
                       ),
+                      const SizedBox(height: 6),
 
-                      const SizedBox(height: 4),
-
-                      // COMPANY (1 LINE)
+                      // COMPANY NAME (MEDIUM)
                       Text(
                         company.isEmpty ? "Company" : company,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: KhilonjiyaUI.sub.copyWith(
-                          fontSize: 13.0,
-                          fontWeight: FontWeight.w800,
+                        style: KhilonjiyaUI.body.copyWith(
+                          fontSize: 13.4,
+                          fontWeight: FontWeight.w900,
                           color: const Color(0xFF334155),
-                          height: 1.15,
+                          height: 1.12,
                         ),
                       ),
                     ],
                   ),
                 ),
 
-                const SizedBox(width: 10),
+                const SizedBox(width: 12),
 
+                // RIGHT ICON (BUSINESS TYPE)
+                _BusinessTypeIcon(
+                  businessType: businessType,
+                  iconUrl: businessIconUrl,
+                  size: 44,
+                ),
+
+                const SizedBox(width: 8),
+
+                // SAVE ICON
                 InkWell(
                   onTap: onSaveToggle,
                   borderRadius: BorderRadius.circular(999),
@@ -150,7 +159,7 @@ class JobCardWidget extends StatelessWidget {
             const SizedBox(height: 14),
 
             // ============================================================
-            // LOCATION (COLORED ICON)
+            // LOCATION
             // ============================================================
             _plainRow(
               icon: Icons.location_on_rounded,
@@ -161,7 +170,7 @@ class JobCardWidget extends StatelessWidget {
             const SizedBox(height: 8),
 
             // ============================================================
-            // EXPERIENCE (COLORED ICON)
+            // EXPERIENCE
             // ============================================================
             _plainRow(
               icon: Icons.work_rounded,
@@ -172,7 +181,7 @@ class JobCardWidget extends StatelessWidget {
             const SizedBox(height: 8),
 
             // ============================================================
-            // SALARY (COLORED ICON)
+            // SALARY
             // ============================================================
             _plainRow(
               icon: Icons.currency_rupee_rounded,
@@ -181,7 +190,7 @@ class JobCardWidget extends StatelessWidget {
             ),
 
             // ============================================================
-            // SYSTEMATIC TAGS (BELOW SALARY)
+            // META TAGS
             // ============================================================
             if (isInternship || isWalkIn) ...[
               const SizedBox(height: 12),
@@ -195,9 +204,6 @@ class JobCardWidget extends StatelessWidget {
               ),
             ],
 
-            // ============================================================
-            // SKILLS TAGS
-            // ============================================================
             if (skills.isNotEmpty) ...[
               const SizedBox(height: 10),
               Wrap(
@@ -210,14 +216,14 @@ class JobCardWidget extends StatelessWidget {
             const SizedBox(height: 14),
 
             // ============================================================
-            // POSTED AGO
+            // FOOTER
             // ============================================================
             Row(
               children: [
                 Text(
                   _postedAgo(postedAt),
                   style: KhilonjiyaUI.sub.copyWith(
-                    fontSize: 12.2,
+                    fontSize: 12.0,
                     color: const Color(0xFF94A3B8),
                     fontWeight: FontWeight.w700,
                   ),
@@ -278,7 +284,7 @@ class JobCardWidget extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: KhilonjiyaUI.sub.copyWith(
-          fontSize: 12.0,
+          fontSize: 11.6,
           fontWeight: FontWeight.w800,
           color: const Color(0xFF334155),
         ),
@@ -287,7 +293,7 @@ class JobCardWidget extends StatelessWidget {
   }
 
   // ============================================================
-  // EXPERIENCE FORMATTER
+  // EXPERIENCE
   // ============================================================
 
   String _formatExperience(Map<String, dynamic> job) {
@@ -300,7 +306,6 @@ class JobCardWidget extends StatelessWidget {
 
     if (raw.isNotEmpty) {
       final lower = raw.toLowerCase();
-
       if (lower.contains('fresh')) return "Fresher";
 
       if (lower.contains('year')) {
@@ -415,7 +420,7 @@ class JobCardWidget extends StatelessWidget {
   }
 
   // ============================================================
-  // SYSTEMATIC TAGS
+  // SYSTEM TAGS
   // ============================================================
 
   bool _isInternship(Map<String, dynamic> job) {
@@ -452,43 +457,60 @@ class JobCardWidget extends StatelessWidget {
 }
 
 // ============================================================
-// COMPANY LOGO (FIRST LETTER ONLY FOR NOW)
+// RIGHT ICON (BUSINESS TYPE)
 // ============================================================
-class _CompanyLetterLogo extends StatelessWidget {
-  final String company;
+class _BusinessTypeIcon extends StatelessWidget {
+  final String businessType;
+  final String? iconUrl;
   final double size;
 
-  const _CompanyLetterLogo({
-    required this.company,
-    this.size = 52,
+  const _BusinessTypeIcon({
+    required this.businessType,
+    required this.iconUrl,
+    this.size = 44,
   });
 
   @override
   Widget build(BuildContext context) {
-    final name = company.trim();
-    final letter = name.isNotEmpty ? name[0].toUpperCase() : 'C';
-
-    final color = Colors.primaries[
-        Random(name.isEmpty ? 1 : name.hashCode).nextInt(Colors.primaries.length)
-    ];
+    final t = businessType.trim();
+    final letter = t.isNotEmpty ? t[0].toUpperCase() : "B";
 
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: color.withOpacity(0.10),
+        color: const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: KhilonjiyaUI.border),
       ),
-      alignment: Alignment.center,
-      child: Text(
-        letter,
-        style: TextStyle(
-          fontSize: size * 0.38,
-          fontWeight: FontWeight.w900,
-          color: color,
-        ),
-      ),
+      clipBehavior: Clip.antiAlias,
+      child: (iconUrl == null || iconUrl!.trim().isEmpty)
+          ? Center(
+              child: Text(
+                letter,
+                style: TextStyle(
+                  fontSize: size * 0.44,
+                  fontWeight: FontWeight.w900,
+                  color: const Color(0xFF0F172A),
+                ),
+              ),
+            )
+          : Image.network(
+              iconUrl!,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) {
+                return Center(
+                  child: Text(
+                    letter,
+                    style: TextStyle(
+                      fontSize: size * 0.44,
+                      fontWeight: FontWeight.w900,
+                      color: const Color(0xFF0F172A),
+                    ),
+                  ),
+                );
+              },
+            ),
     );
   }
 }
