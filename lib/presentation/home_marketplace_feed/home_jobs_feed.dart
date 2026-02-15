@@ -26,7 +26,7 @@ import 'jobs_nearby_page.dart';
 
 import 'construction_services_home_page.dart';
 
-import 'profile_edit_page.dart'; // ✅ ADDED
+import 'profile_edit_page.dart';
 
 import 'widgets/naukri_drawer.dart';
 
@@ -35,7 +35,7 @@ import 'widgets/home_sections/profile_and_search_cards.dart';
 import 'widgets/home_sections/boost_card.dart';
 import 'widgets/home_sections/expected_salary_card.dart';
 import 'widgets/home_sections/section_header.dart';
-import 'widgets/home_sections/job_card_horizontal.dart';
+import '../common/widgets/cards/job_card_horizontal.dart';
 
 class HomeJobsFeed extends StatefulWidget {
   const HomeJobsFeed({Key? key}) : super(key: key);
@@ -454,7 +454,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
           // Notifications
           InkWell(
             onTap: () {
-              // you can open NotificationsPage later
+              // NotificationsPage later
             },
             borderRadius: BorderRadius.circular(999),
             child: Stack(
@@ -531,7 +531,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
             lastUpdatedText: _lastUpdatedText,
             missingDetails: _missingDetails,
             jobsPostedToday: _jobsPostedToday,
-            onProfileTap: _openProfileEditPage, // ✅ FIXED
+            onProfileTap: _openProfileEditPage,
             onMissingDetailsTap: _openProfileEditPage,
             onViewAllTap: _openProfileEditPage,
           ),
@@ -569,7 +569,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
           ),
           const SizedBox(height: 10),
           SizedBox(
-            height: 210,
+            height: 170,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: jobsForRecommendedHorizontal.length,
@@ -599,7 +599,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
           ),
           const SizedBox(height: 10),
           SizedBox(
-            height: 210,
+            height: 170,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: jobsForLatestHorizontal.length,
@@ -629,7 +629,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
           ),
           const SizedBox(height: 10),
           SizedBox(
-            height: 210,
+            height: 170,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: jobsForNearbyHorizontal.length,
