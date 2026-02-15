@@ -9,6 +9,8 @@ class JobCardHorizontal extends StatelessWidget {
   final VoidCallback onSaveToggle;
   final VoidCallback onTap;
 
+  /// Option A (passed from parent or extracted here)
+  /// We will extract from job['companies']['business_types_master']
   const JobCardHorizontal({
     Key? key,
     required this.job,
@@ -62,31 +64,37 @@ class JobCardHorizontal extends StatelessWidget {
 
     // ------------------------------------------------------------
     // BUSINESS TYPE (Option A)
-    // companies.business_types_master.name + icon_url
+    // companies.business_types_master (type_name, logo_url)
     // ------------------------------------------------------------
-    String businessType = '';
+    String businessType = "Business";
     String? businessIconUrl;
 
     if (companyMap is Map<String, dynamic>) {
       final bt = companyMap['business_types_master'];
 
       if (bt is Map<String, dynamic>) {
-        businessType = (bt['name'] ?? '').toString().trim();
-        final url = (bt['icon_url'] ?? '').toString().trim();
+        final name = (bt['type_name'] ?? '').toString().trim();
+        if (name.isNotEmpty) businessType = name;
+
+        final url = (bt['logo_url'] ?? '').toString().trim();
         businessIconUrl = url.isEmpty ? null : url;
       }
 
-      // fallback if you stored directly in companies
-      if (businessType.isEmpty) {
-        businessType = (companyMap['business_type'] ?? '').toString().trim();
+      // fallback if business_types_master is missing
+      if (businessType.trim().isEmpty) {
+        final fallback =
+            (companyMap['industry'] ?? companyMap['business_type'] ?? '')
+                .toString()
+                .trim();
+        if (fallback.isNotEmpty) businessType = fallback;
       }
+
+      // fallback if logo is stored directly in companies
       if (businessIconUrl == null) {
-        final url = (companyMap['business_icon_url'] ?? '').toString().trim();
+        final url = (companyMap['logo_url'] ?? '').toString().trim();
         businessIconUrl = url.isEmpty ? null : url;
       }
     }
-
-    if (businessType.isEmpty) businessType = "Business";
 
     // ------------------------------------------------------------
     // UI (Same to same as vertical but compressed)
@@ -313,7 +321,7 @@ class JobCardHorizontal extends StatelessWidget {
 
 // ============================================================
 // BUSINESS TYPE ICON (Option A)
-// - Uses icon_url if available
+// - Uses logo_url if available
 // - Else first letter of business type
 // ============================================================
 class _BusinessTypeIcon extends StatelessWidget {
