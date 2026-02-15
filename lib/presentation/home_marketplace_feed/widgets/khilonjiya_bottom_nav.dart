@@ -49,11 +49,14 @@ class KhilonjiyaBottomNav extends StatelessWidget {
               activeIcon: Icon(Icons.work_rounded),
               label: "My Jobs",
             ),
+
+            // ✅ Subscription (replaced Messages)
             BottomNavigationBarItem(
-              icon: Icon(Icons.chat_bubble_outline_rounded),
-              activeIcon: Icon(Icons.chat_bubble_rounded),
-              label: "Messages",
+              icon: Icon(Icons.workspace_premium_outlined),
+              activeIcon: Icon(Icons.workspace_premium_rounded),
+              label: "Subscription",
             ),
+
             BottomNavigationBarItem(
               icon: Icon(Icons.bookmark_outline_rounded),
               activeIcon: Icon(Icons.bookmark_rounded),
