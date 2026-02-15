@@ -8,14 +8,14 @@ class ProfileAndSearchCards extends StatelessWidget {
   final String profileName;
   final int profileCompletion;
   final String lastUpdatedText;
-  final int missingDetails;
+  final int missingDetails; // kept for compatibility (not used in UI now)
 
   // RIGHT CARD
   final int jobsPostedToday;
 
   // EVENTS
   final VoidCallback? onProfileTap;
-  final VoidCallback? onMissingDetailsTap;
+  final VoidCallback? onMissingDetailsTap; // kept for compatibility (not used now)
   final VoidCallback? onViewAllTap;
 
   const ProfileAndSearchCards({
@@ -90,9 +90,9 @@ class ProfileAndSearchCards extends StatelessWidget {
                   const Spacer(),
 
                   InkWell(
-                    onTap: onMissingDetailsTap,
+                    onTap: onProfileTap,
                     child: Text(
-                      "$missingDetails Missing details",
+                      "Complete Profile",
                       style: KhilonjiyaUI.link,
                     ),
                   ),
@@ -113,15 +113,18 @@ class ProfileAndSearchCards extends StatelessWidget {
                 Text(
                   "$jobsPostedToday",
                   style: KhilonjiyaUI.h1.copyWith(
-                    fontSize: 30,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 26, // smaller than before
+                    fontWeight: FontWeight.w800,
+                    color: const Color(0xFFF59E0B), // light orange
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text("Jobs posted today", style: KhilonjiyaUI.cardTitle),
                 const SizedBox(height: 4),
+
+                // Removed: "All India • Active only"
                 Text(
-                  "All India • Active only",
+                  "Active only",
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: KhilonjiyaUI.sub,
