@@ -25,17 +25,11 @@ class AIBannerCard extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFF2563EB),
-            Color(0xFF6366F1),
+            Color(0xFFF5F3FF), // same as BoostCard
+            Color(0xFFE0E7FF), // same as BoostCard
           ],
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
+        border: Border.all(color: const Color(0xFFE6E8EC)),
       ),
       child: InkWell(
         borderRadius: KhilonjiyaUI.r20,
@@ -50,17 +44,17 @@ class AIBannerCard extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: KhilonjiyaUI.hTitle.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
+                      style: KhilonjiyaUI.cardTitle.copyWith(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                        color: const Color(0xFF0F172A),
                       ),
                     ),
                     const SizedBox(height: 6),
                     Text(
                       subtitle,
-                      style: KhilonjiyaUI.body.copyWith(
-                        color: Colors.white.withOpacity(0.92),
-                        fontSize: 13.5,
+                      style: KhilonjiyaUI.sub.copyWith(
+                        color: const Color(0xFF334155),
                       ),
                     ),
                   ],
@@ -71,14 +65,13 @@ class AIBannerCard extends StatelessWidget {
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.16),
+                  color: Colors.white.withOpacity(0.75),
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white.withOpacity(0.25)),
+                  border: Border.all(color: KhilonjiyaUI.border),
                 ),
                 child: const Icon(
                   Icons.arrow_forward_rounded,
-                  color: Colors.white,
-                  size: 22,
+                  color: Color(0xFF4F46E5), // same as BoostCard
                 ),
               ),
             ],
