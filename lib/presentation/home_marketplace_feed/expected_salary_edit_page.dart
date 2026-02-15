@@ -21,22 +21,30 @@ class _ExpectedSalaryEditPageState extends State<ExpectedSalaryEditPage> {
   final JobSeekerHomeService _service = JobSeekerHomeService();
 
   bool _saving = false;
-
   late final TextEditingController _ctrl;
+  final FocusNode _focusNode = FocusNode();
 
   @override
   void initState() {
     super.initState();
+
     _ctrl = TextEditingController(
       text: widget.initialSalaryPerMonth <= 0
           ? ''
           : widget.initialSalaryPerMonth.toString(),
     );
+
+    // Auto focus after build so keyboard comes up properly
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focusNode.requestFocus();
+    });
   }
 
   @override
   void dispose() {
     _ctrl.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -85,7 +93,7 @@ class _ExpectedSalaryEditPageState extends State<ExpectedSalaryEditPage> {
 
       if (!mounted) return;
 
-      // return salary to previous page
+      // Return salary to previous page
       Navigator.pop(context, v);
     } catch (_) {
       if (!mounted) return;
@@ -98,8 +106,14 @@ class _ExpectedSalaryEditPageState extends State<ExpectedSalaryEditPage> {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
     return Scaffold(
       backgroundColor: KhilonjiyaUI.bg,
+
+      // ✅ IMPORTANT FIX (keyboard safe)
+      resizeToAvoidBottomInset: true,
+
       body: SafeArea(
         child: Column(
           children: [
@@ -131,7 +145,11 @@ class _ExpectedSalaryEditPageState extends State<ExpectedSalaryEditPage> {
 
             Expanded(
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 30),
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+
+                // ✅ IMPORTANT FIX (push content above keyboard)
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 30 + bottomInset),
                 children: [
                   Container(
                     decoration: KhilonjiyaUI.cardDecoration(radius: 22),
@@ -180,8 +198,13 @@ class _ExpectedSalaryEditPageState extends State<ExpectedSalaryEditPage> {
 
                   TextField(
                     controller: _ctrl,
+                    focusNode: _focusNode,
                     keyboardType: TextInputType.number,
-                    style: KhilonjiyaUI.body.copyWith(fontWeight: FontWeight.w900),
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _save(),
+                    style: KhilonjiyaUI.body.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
                     decoration: _dec("Example: 15000"),
                   ),
 
