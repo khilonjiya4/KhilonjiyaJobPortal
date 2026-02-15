@@ -34,8 +34,7 @@ import 'widgets/home_sections/profile_and_search_cards.dart';
 import 'widgets/home_sections/boost_card.dart';
 import 'widgets/home_sections/expected_salary_card.dart';
 import 'widgets/home_sections/section_header.dart';
-
-import '../common/widgets/cards/job_card_horizontal.dart';
+import 'widgets/home_sections/job_card_horizontal.dart';
 
 class HomeJobsFeed extends StatefulWidget {
   const HomeJobsFeed({Key? key}) : super(key: key);
