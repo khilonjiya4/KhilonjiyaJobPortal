@@ -11,6 +11,10 @@ import '../saved_jobs_page.dart';
 import '../profile_performance_page.dart';
 import '../profile_edit_page.dart';
 
+// ✅ NEW PAGES
+import '../settings_page.dart';
+import '../help_page.dart';
+
 class NaukriDrawer extends StatelessWidget {
   final String userName;
   final int profileCompletion;
@@ -56,7 +60,6 @@ class NaukriDrawer extends StatelessWidget {
   }
 
   void _openUpgrade(BuildContext context) {
-    // TODO: Later (Pro page)
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text("Khilonjiya Pro coming soon")),
     );
@@ -79,6 +82,15 @@ class NaukriDrawer extends StatelessWidget {
 
   void _openProfilePerformance(BuildContext context) {
     _openPage(context, const ProfilePerformancePage());
+  }
+
+  // ✅ NEW
+  void _openSettings(BuildContext context) {
+    _openPage(context, const SettingsPage());
+  }
+
+  void _openHelp(BuildContext context) {
+    _openPage(context, const HelpPage());
   }
 
   @override
@@ -133,7 +145,6 @@ class NaukriDrawer extends StatelessWidget {
                       ),
                       const SizedBox(width: 12),
 
-                      // Name + Update profile
                       Expanded(
                         child: InkWell(
                           onTap: () => _openUpdateProfile(context),
@@ -171,7 +182,6 @@ class NaukriDrawer extends StatelessWidget {
                   ),
                   const SizedBox(height: 14),
 
-                  // Upgrade card
                   InkWell(
                     onTap: () => _openUpgrade(context),
                     borderRadius: KhilonjiyaUI.r16,
@@ -268,8 +278,33 @@ class NaukriDrawer extends StatelessWidget {
 
                   const SizedBox(height: 8),
 
+                  // ✅ SETTINGS
+                  _menuItem(
+                    context,
+                    icon: Icons.settings_outlined,
+                    title: "Settings",
+                    onTap: () => _openSettings(context),
+                  ),
+
+                  // ✅ HELP
+                  _menuItem(
+                    context,
+                    icon: Icons.help_outline_rounded,
+                    title: "Help",
+                    onTap: () => _openHelp(context),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  Container(
+                    height: 10,
+                    color: const Color(0xFFF7F8FA),
+                  ),
+
+                  const SizedBox(height: 8),
+
                   // ------------------------------------------------------------
-                  // LOGOUT
+                  // LOGOUT (BOTTOM)
                   // ------------------------------------------------------------
                   _menuItem(
                     context,
@@ -287,7 +322,7 @@ class NaukriDrawer extends StatelessWidget {
             ),
 
             // ------------------------------------------------------------
-            // FEEDBACK STRIP (UI only)
+            // FEEDBACK STRIP
             // ------------------------------------------------------------
             Container(
               padding: const EdgeInsets.all(16),
