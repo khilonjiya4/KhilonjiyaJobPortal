@@ -1,3 +1,5 @@
+// File: lib/presentation/common/widgets/cards/job_card_widget.dart
+
 import 'package:flutter/material.dart';
 import '../../../../core/ui/khilonjiya_ui.dart';
 
@@ -7,18 +9,12 @@ class JobCardWidget extends StatelessWidget {
   final VoidCallback onSaveToggle;
   final VoidCallback onTap;
 
-  /// NEW (passed from parent for now)
-  final String businessType;
-  final String? businessIconUrl;
-
   const JobCardWidget({
     Key? key,
     required this.job,
     required this.isSaved,
     required this.onSaveToggle,
     required this.onTap,
-    required this.businessType,
-    this.businessIconUrl,
   }) : super(key: key);
 
   @override
@@ -28,6 +24,7 @@ class JobCardWidget extends StatelessWidget {
     // ------------------------------------------------------------
     final title = (job['job_title'] ?? job['title'] ?? 'Job').toString().trim();
 
+    // joined companies
     final companyMap = job['companies'];
     final companyName = (companyMap is Map<String, dynamic>)
         ? (companyMap['name'] ?? '').toString().trim()
@@ -64,6 +61,33 @@ class JobCardWidget extends StatelessWidget {
     final postedAt = job['created_at']?.toString();
 
     // ------------------------------------------------------------
+    // BUSINESS TYPE (Option A)
+    // companies.business_types_master.name + icon_url
+    // ------------------------------------------------------------
+    String businessType = '';
+    String? businessIconUrl;
+
+    if (companyMap is Map<String, dynamic>) {
+      // preferred: nested join
+      final bt = companyMap['business_types_master'];
+
+      if (bt is Map<String, dynamic>) {
+        businessType = (bt['name'] ?? '').toString().trim();
+        final url = (bt['icon_url'] ?? '').toString().trim();
+        businessIconUrl = url.isEmpty ? null : url;
+      }
+
+      // fallback: if you store directly in companies
+      if (businessType.isEmpty) {
+        businessType = (companyMap['business_type'] ?? '').toString().trim();
+      }
+      if (businessIconUrl == null) {
+        final url = (companyMap['business_icon_url'] ?? '').toString().trim();
+        businessIconUrl = url.isEmpty ? null : url;
+      }
+    }
+
+    // ------------------------------------------------------------
     // UI
     // ------------------------------------------------------------
     return InkWell(
@@ -88,7 +112,7 @@ class JobCardWidget extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ============================================================
-            // HEADER ROW (TITLE + COMPANY + RIGHT ICON + SAVE)
+            // HEADER (LEFT TEXT + RIGHT BUSINESS ICON + SAVE)
             // ============================================================
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -98,20 +122,20 @@ class JobCardWidget extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // JOB TITLE (BIGGEST)
+                      // JOB TITLE (HIGHEST SIZE)
                       Text(
                         title.isEmpty ? "Job" : title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: KhilonjiyaUI.cardTitle.copyWith(
-                          fontSize: 16.6,
+                          fontSize: 16.8,
                           fontWeight: FontWeight.w900,
-                          height: 1.12,
+                          height: 1.10,
                         ),
                       ),
                       const SizedBox(height: 6),
 
-                      // COMPANY NAME (MEDIUM)
+                      // COMPANY NAME (MEDIUM SIZE)
                       Text(
                         company.isEmpty ? "Company" : company,
                         maxLines: 1,
@@ -120,7 +144,7 @@ class JobCardWidget extends StatelessWidget {
                           fontSize: 13.4,
                           fontWeight: FontWeight.w900,
                           color: const Color(0xFF334155),
-                          height: 1.12,
+                          height: 1.10,
                         ),
                       ),
                     ],
@@ -133,12 +157,15 @@ class JobCardWidget extends StatelessWidget {
                 _BusinessTypeIcon(
                   businessType: businessType,
                   iconUrl: businessIconUrl,
-                  size: 44,
+                  // NOTE:
+                  // Vertical card height is NOT fixed.
+                  // So we keep a clean fixed size.
+                  size: 52,
                 ),
 
                 const SizedBox(width: 8),
 
-                // SAVE ICON
+                // SAVE
                 InkWell(
                   onTap: onSaveToggle,
                   borderRadius: BorderRadius.circular(999),
@@ -190,7 +217,7 @@ class JobCardWidget extends StatelessWidget {
             ),
 
             // ============================================================
-            // META TAGS
+            // TAGS (META SIZE)
             // ============================================================
             if (isInternship || isWalkIn) ...[
               const SizedBox(height: 12),
@@ -216,7 +243,7 @@ class JobCardWidget extends StatelessWidget {
             const SizedBox(height: 14),
 
             // ============================================================
-            // FOOTER
+            // FOOTER (POSTED AGO ALWAYS BOTTOM LINE)
             // ============================================================
             Row(
               children: [
@@ -264,6 +291,7 @@ class JobCardWidget extends StatelessWidget {
               fontSize: 13.2,
               fontWeight: FontWeight.w800,
               color: const Color(0xFF0F172A),
+              height: 1.20,
             ),
           ),
         ),
@@ -287,6 +315,7 @@ class JobCardWidget extends StatelessWidget {
           fontSize: 11.6,
           fontWeight: FontWeight.w800,
           color: const Color(0xFF334155),
+          height: 1.05,
         ),
       ),
     );
@@ -316,14 +345,10 @@ class JobCardWidget extends StatelessWidget {
       }
 
       final range = RegExp(r'^(\d+)\s*-\s*(\d+)$');
-      if (range.hasMatch(raw)) {
-        return "${raw.replaceAll(' ', '')} years";
-      }
+      if (range.hasMatch(raw)) return "${raw.replaceAll(' ', '')} years";
 
       final single = int.tryParse(raw);
-      if (single != null) {
-        return single == 1 ? "1 year" : "$single years";
-      }
+      if (single != null) return single == 1 ? "1 year" : "$single years";
 
       return raw;
     }
@@ -387,6 +412,7 @@ class JobCardWidget extends StatelessWidget {
       range = "Up to ${mx!}";
     }
 
+    // keep monthly text (your schema is monthly default)
     return "$range per month";
   }
 
@@ -467,7 +493,7 @@ class _BusinessTypeIcon extends StatelessWidget {
   const _BusinessTypeIcon({
     required this.businessType,
     required this.iconUrl,
-    this.size = 44,
+    this.size = 52,
   });
 
   @override
@@ -492,6 +518,7 @@ class _BusinessTypeIcon extends StatelessWidget {
                   fontSize: size * 0.44,
                   fontWeight: FontWeight.w900,
                   color: const Color(0xFF0F172A),
+                  height: 1.0,
                 ),
               ),
             )
@@ -506,6 +533,7 @@ class _BusinessTypeIcon extends StatelessWidget {
                       fontSize: size * 0.44,
                       fontWeight: FontWeight.w900,
                       color: const Color(0xFF0F172A),
+                      height: 1.0,
                     ),
                   ),
                 );
