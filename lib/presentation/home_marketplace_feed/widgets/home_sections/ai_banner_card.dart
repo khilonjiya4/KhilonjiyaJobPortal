@@ -25,11 +25,18 @@ class AIBannerCard extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFFF5F3FF), // same as BoostCard
-            Color(0xFFE0E7FF), // same as BoostCard
+            Color(0xFFF5F3FF),
+            Color(0xFFE0E7FF),
           ],
         ),
         border: Border.all(color: const Color(0xFFE6E8EC)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: InkWell(
         borderRadius: KhilonjiyaUI.r20,
@@ -71,7 +78,7 @@ class AIBannerCard extends StatelessWidget {
                 ),
                 child: const Icon(
                   Icons.arrow_forward_rounded,
-                  color: Color(0xFF4F46E5), // same as BoostCard
+                  color: Color(0xFF4F46E5),
                 ),
               ),
             ],
