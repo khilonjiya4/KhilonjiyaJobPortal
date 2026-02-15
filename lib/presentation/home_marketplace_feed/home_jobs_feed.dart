@@ -24,7 +24,9 @@ import 'jobs_by_salary_page.dart';
 import 'latest_jobs_page.dart';
 import 'jobs_nearby_page.dart';
 
-import 'construction_services_home_page.dart'; // ✅ ADDED
+import 'construction_services_home_page.dart';
+
+import 'profile_edit_page.dart'; // ✅ ADDED
 
 import 'widgets/naukri_drawer.dart';
 
@@ -50,13 +52,18 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   bool _isDisposed = false;
 
   // ------------------------------------------------------------
-  // HOME SUMMARY (REAL)
+  // HOME SUMMARY
   // ------------------------------------------------------------
   String _profileName = "Your Profile";
   int _profileCompletion = 0;
   String _lastUpdatedText = "Updated recently";
   int _missingDetails = 0;
   int _jobsPostedToday = 0;
+
+  // ------------------------------------------------------------
+  // NOTIFICATIONS
+  // ------------------------------------------------------------
+  int _unreadNotifications = 0;
 
   // ------------------------------------------------------------
   // EXPECTED SALARY
@@ -149,15 +156,12 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   Future<void> _loadInitialData() async {
     if (_isDisposed) return;
 
-    // auth already checked in _initialize()
     if (!_isDisposed) {
       setState(() => _isCheckingAuth = false);
     }
 
     try {
-      // ------------------------------------------------------------
       // 1) Home summary
-      // ------------------------------------------------------------
       final summary = await _homeService.getHomeProfileSummary();
       final jobsCount = await _homeService.getJobsPostedTodayCount();
 
@@ -168,32 +172,29 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
       _missingDetails = (summary['missingDetails'] ?? 0) as int;
       _jobsPostedToday = jobsCount;
 
-      // ------------------------------------------------------------
       // 2) Expected salary
-      // ------------------------------------------------------------
       _expectedSalaryPerMonth = await _homeService.getExpectedSalaryPerMonth();
 
-      // ------------------------------------------------------------
       // 3) Saved jobs
-      // ------------------------------------------------------------
       _savedJobIds = await _homeService.getUserSavedJobs();
 
-      // ------------------------------------------------------------
       // 4) Premium jobs
-      // ------------------------------------------------------------
       _premiumJobs = await _homeService.fetchPremiumJobs(limit: 8);
 
-      // ------------------------------------------------------------
       // 5) Jobs for sections
-      // ------------------------------------------------------------
       _recommendedJobs = await _homeService.getRecommendedJobs(limit: 40);
       _latestJobs = await _homeService.fetchLatestJobs(limit: 40);
       _nearbyJobs = await _homeService.fetchJobsNearby(limit: 40);
 
-      // ------------------------------------------------------------
       // 6) Top companies
-      // ------------------------------------------------------------
       _topCompanies = await _homeService.fetchTopCompanies(limit: 8);
+
+      // 7) Notifications count
+      try {
+        _unreadNotifications = await _homeService.getUnreadNotificationsCount();
+      } catch (_) {
+        _unreadNotifications = 0;
+      }
     } finally {
       if (!_isDisposed) {
         setState(() {
@@ -202,6 +203,17 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
         });
       }
     }
+  }
+
+  Future<void> _refreshHome() async {
+    if (_isDisposed) return;
+
+    setState(() {
+      _isLoadingProfile = true;
+      _loadingCompanies = true;
+    });
+
+    await _loadInitialData();
   }
 
   // ------------------------------------------------------------
@@ -299,6 +311,20 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
         builder: (_) => CompanyDetailsPage(companyId: companyId),
       ),
     );
+  }
+
+  // ------------------------------------------------------------
+  // PROFILE EDIT
+  // ------------------------------------------------------------
+  Future<void> _openProfileEditPage() async {
+    final updated = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const ProfileEditPage()),
+    );
+
+    if (updated == true) {
+      await _refreshHome();
+    }
   }
 
   // ------------------------------------------------------------
@@ -424,35 +450,44 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
             ),
           ),
           const SizedBox(width: 8),
-          Stack(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: KhilonjiyaUI.border),
-                ),
-                child: const Icon(
-                  Icons.notifications_none_outlined,
-                  size: 22,
-                  color: Color(0xFF334155),
-                ),
-              ),
-              Positioned(
-                right: 9,
-                top: 9,
-                child: Container(
-                  width: 9,
-                  height: 9,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFEF4444),
-                    shape: BoxShape.circle,
+
+          // Notifications
+          InkWell(
+            onTap: () {
+              // you can open NotificationsPage later
+            },
+            borderRadius: BorderRadius.circular(999),
+            child: Stack(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: KhilonjiyaUI.border),
+                  ),
+                  child: const Icon(
+                    Icons.notifications_none_outlined,
+                    size: 22,
+                    color: Color(0xFF334155),
                   ),
                 ),
-              ),
-            ],
+                if (_unreadNotifications > 0)
+                  Positioned(
+                    right: 9,
+                    top: 9,
+                    child: Container(
+                      width: 9,
+                      height: 9,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFEF4444),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ],
       ),
@@ -482,184 +517,186 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
     final jobsForLatestHorizontal = _latestJobs.take(10).toList();
     final jobsForNearbyHorizontal = _nearbyJobs.take(10).toList();
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
-      children: [
-        AIBannerCard(onTap: _openRecommendedJobsPage),
-        const SizedBox(height: 14),
+    return RefreshIndicator(
+      onRefresh: _refreshHome,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+        children: [
+          AIBannerCard(onTap: _openRecommendedJobsPage),
+          const SizedBox(height: 14),
 
-        ProfileAndSearchCards(
-          profileName: _profileName,
-          profileCompletion: _profileCompletion,
-          lastUpdatedText: _lastUpdatedText,
-          missingDetails: _missingDetails,
-          jobsPostedToday: _jobsPostedToday,
-          onProfileTap: () {},
-          onMissingDetailsTap: () {},
-          onViewAllTap: () {},
-        ),
-        const SizedBox(height: 14),
+          ProfileAndSearchCards(
+            profileName: _profileName,
+            profileCompletion: _profileCompletion,
+            lastUpdatedText: _lastUpdatedText,
+            missingDetails: _missingDetails,
+            jobsPostedToday: _jobsPostedToday,
+            onProfileTap: _openProfileEditPage, // ✅ FIXED
+            onMissingDetailsTap: _openProfileEditPage,
+            onViewAllTap: _openProfileEditPage,
+          ),
+          const SizedBox(height: 14),
 
-        // ✅ BOOST CARD NAVIGATION FIXED
-        BoostCard(
-          label: "Construction",
-          title: "Khilonjiya Construction Service",
-          subtitle: "Your trusted construction partner",
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const ConstructionServicesHomePage(),
-              ),
-            );
-          },
-        ),
-        const SizedBox(height: 14),
-
-        ExpectedSalaryCard(
-          expectedSalaryPerMonth: _expectedSalaryPerMonth,
-          onTap: _openExpectedSalaryEditPage,
-          onIconTap: _openJobsBySalary,
-        ),
-        const SizedBox(height: 18),
-
-        // ------------------------------------------------------------
-        // RECOMMENDED
-        // ------------------------------------------------------------
-        SectionHeader(
-          title: "Recommended jobs",
-          ctaText: "View all",
-          onTap: _openRecommendedJobsPage,
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          height: 210,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: jobsForRecommendedHorizontal.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
-            itemBuilder: (_, i) {
-              final job = jobsForRecommendedHorizontal[i];
-
-              return JobCardHorizontal(
-                job: job,
-                isSaved: _savedJobIds.contains(job['id'].toString()),
-                onSaveToggle: () => _toggleSaveJob(job['id'].toString()),
-                onTap: () => _openJobDetails(job),
+          BoostCard(
+            label: "Construction",
+            title: "Khilonjiya Construction Service",
+            subtitle: "Your trusted construction partner",
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const ConstructionServicesHomePage(),
+                ),
               );
             },
           ),
-        ),
+          const SizedBox(height: 14),
 
-        const SizedBox(height: 18),
-
-        // ------------------------------------------------------------
-        // LATEST
-        // ------------------------------------------------------------
-        SectionHeader(
-          title: "Latest jobs",
-          ctaText: "View all",
-          onTap: _openLatestJobsPage,
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          height: 210,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: jobsForLatestHorizontal.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
-            itemBuilder: (_, i) {
-              final job = jobsForLatestHorizontal[i];
-
-              return JobCardHorizontal(
-                job: job,
-                isSaved: _savedJobIds.contains(job['id'].toString()),
-                onSaveToggle: () => _toggleSaveJob(job['id'].toString()),
-                onTap: () => _openJobDetails(job),
-              );
-            },
+          ExpectedSalaryCard(
+            expectedSalaryPerMonth: _expectedSalaryPerMonth,
+            onTap: _openExpectedSalaryEditPage,
+            onIconTap: _openJobsBySalary,
           ),
-        ),
+          const SizedBox(height: 18),
 
-        const SizedBox(height: 18),
-
-        // ------------------------------------------------------------
-        // NEARBY
-        // ------------------------------------------------------------
-        SectionHeader(
-          title: "Jobs nearby",
-          ctaText: "View all",
-          onTap: _openJobsNearbyPage,
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          height: 210,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: jobsForNearbyHorizontal.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
-            itemBuilder: (_, i) {
-              final job = jobsForNearbyHorizontal[i];
-
-              return JobCardHorizontal(
-                job: job,
-                isSaved: _savedJobIds.contains(job['id'].toString()),
-                onSaveToggle: () => _toggleSaveJob(job['id'].toString()),
-                onTap: () => _openJobDetails(job),
-              );
-            },
+          // ------------------------------------------------------------
+          // RECOMMENDED
+          // ------------------------------------------------------------
+          SectionHeader(
+            title: "Recommended jobs",
+            ctaText: "View all",
+            onTap: _openRecommendedJobsPage,
           ),
-        ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 210,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: jobsForRecommendedHorizontal.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (_, i) {
+                final job = jobsForRecommendedHorizontal[i];
 
-        const SizedBox(height: 18),
-
-        // ------------------------------------------------------------
-        // TOP COMPANIES (VERTICAL)
-        // ------------------------------------------------------------
-        SectionHeader(
-          title: "Top companies",
-          ctaText: "View all",
-          onTap: _openTopCompaniesPage,
-        ),
-        const SizedBox(height: 10),
-
-        if (_loadingCompanies)
-          Column(
-            children: List.generate(
-              4,
-              (_) => Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                height: 86,
-                decoration: KhilonjiyaUI.cardDecoration(radius: 16),
-              ),
+                return JobCardHorizontal(
+                  job: job,
+                  isSaved: _savedJobIds.contains(job['id'].toString()),
+                  onSaveToggle: () => _toggleSaveJob(job['id'].toString()),
+                  onTap: () => _openJobDetails(job),
+                );
+              },
             ),
-          )
-        else if (_topCompanies.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Text(
-              "No companies found",
-              style: KhilonjiyaUI.sub,
-            ),
-          )
-        else
-          ListView.builder(
-            itemCount: _topCompanies.length,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemBuilder: (_, i) {
-              final c = _topCompanies[i];
-              final companyId = c['id']?.toString() ?? '';
-
-              return CompanyCard(
-                company: c,
-                onTap: () => _openCompanyDetails(companyId),
-              );
-            },
           ),
 
-        const SizedBox(height: 10),
-      ],
+          const SizedBox(height: 18),
+
+          // ------------------------------------------------------------
+          // LATEST
+          // ------------------------------------------------------------
+          SectionHeader(
+            title: "Latest jobs",
+            ctaText: "View all",
+            onTap: _openLatestJobsPage,
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 210,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: jobsForLatestHorizontal.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (_, i) {
+                final job = jobsForLatestHorizontal[i];
+
+                return JobCardHorizontal(
+                  job: job,
+                  isSaved: _savedJobIds.contains(job['id'].toString()),
+                  onSaveToggle: () => _toggleSaveJob(job['id'].toString()),
+                  onTap: () => _openJobDetails(job),
+                );
+              },
+            ),
+          ),
+
+          const SizedBox(height: 18),
+
+          // ------------------------------------------------------------
+          // NEARBY
+          // ------------------------------------------------------------
+          SectionHeader(
+            title: "Jobs nearby",
+            ctaText: "View all",
+            onTap: _openJobsNearbyPage,
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 210,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: jobsForNearbyHorizontal.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (_, i) {
+                final job = jobsForNearbyHorizontal[i];
+
+                return JobCardHorizontal(
+                  job: job,
+                  isSaved: _savedJobIds.contains(job['id'].toString()),
+                  onSaveToggle: () => _toggleSaveJob(job['id'].toString()),
+                  onTap: () => _openJobDetails(job),
+                );
+              },
+            ),
+          ),
+
+          const SizedBox(height: 18),
+
+          // ------------------------------------------------------------
+          // TOP COMPANIES
+          // ------------------------------------------------------------
+          SectionHeader(
+            title: "Top companies",
+            ctaText: "View all",
+            onTap: _openTopCompaniesPage,
+          ),
+          const SizedBox(height: 10),
+
+          if (_loadingCompanies)
+            Column(
+              children: List.generate(
+                4,
+                (_) => Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  height: 86,
+                  decoration: KhilonjiyaUI.cardDecoration(radius: 16),
+                ),
+              ),
+            )
+          else if (_topCompanies.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                "No companies found",
+                style: KhilonjiyaUI.sub,
+              ),
+            )
+          else
+            ListView.builder(
+              itemCount: _topCompanies.length,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemBuilder: (_, i) {
+                final c = _topCompanies[i];
+                final companyId = c['id']?.toString() ?? '';
+
+                return CompanyCard(
+                  company: c,
+                  onTap: () => _openCompanyDetails(companyId),
+                );
+              },
+            ),
+
+          const SizedBox(height: 10),
+        ],
+      ),
     );
   }
 
