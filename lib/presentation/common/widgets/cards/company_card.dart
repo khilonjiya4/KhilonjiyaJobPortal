@@ -11,8 +11,8 @@ class CompanyCard extends StatelessWidget {
     this.onTap,
   }) : super(key: key);
 
-  static const double _cardHeight = 108; // fixed (same feel as job cards)
-  static const double _logoSize = _cardHeight * 0.30; // 32.4
+  static const double _cardHeight = 108; // same feel as job cards
+  static const double _logoSize = _cardHeight * 0.30; // 30% height
 
   @override
   Widget build(BuildContext context) {
@@ -29,6 +29,7 @@ class CompanyCard extends StatelessWidget {
 
     if (bt is Map<String, dynamic>) {
       businessType = (bt['type_name'] ?? '').toString().trim();
+
       final url = (bt['logo_url'] ?? '').toString().trim();
       businessIconUrl = url.isEmpty ? null : url;
     }
@@ -40,11 +41,6 @@ class CompanyCard extends StatelessWidget {
     if (businessType.isEmpty) businessType = "Business";
 
     final isVerified = (company['is_verified'] ?? false) == true;
-
-    final ratingRaw = company['rating'];
-    final rating = _toDouble(ratingRaw);
-
-    final companySize = (company['company_size'] ?? '').toString().trim();
 
     final totalJobs = _toInt(company['total_jobs']);
 
@@ -73,39 +69,49 @@ class CompanyCard extends StatelessWidget {
         child: Row(
           children: [
             // ============================================================
-            // LEFT: BUSINESS TYPE LOGO (30% HEIGHT)
-            // ============================================================
-            _BusinessTypeIcon(
-              businessType: businessType,
-              iconUrl: businessIconUrl,
-              size: _logoSize,
-            ),
-
-            const SizedBox(width: 14),
-
-            // ============================================================
-            // CENTER: NAME + BUSINESS TYPE + META
+            // LEFT: TEXT BLOCK
+            // Company Name + Verified
+            // Business Type
+            // Jobs Posted
             // ============================================================
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // COMPANY NAME (HIGHEST)
-                  Text(
-                    name.isEmpty ? "Company" : name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: KhilonjiyaUI.cardTitle.copyWith(
-                      fontSize: 15.4,
-                      fontWeight: FontWeight.w900,
-                      height: 1.05,
-                    ),
+                  // --------------------------------------------------------
+                  // Company name + verified icon
+                  // --------------------------------------------------------
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          name.isEmpty ? "Company" : name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: KhilonjiyaUI.cardTitle.copyWith(
+                            fontSize: 15.6,
+                            fontWeight: FontWeight.w900,
+                            height: 1.05,
+                          ),
+                        ),
+                      ),
+                      if (isVerified) ...[
+                        const SizedBox(width: 6),
+                        const Icon(
+                          Icons.verified_rounded,
+                          size: 18,
+                          color: Color(0xFF2563EB),
+                        ),
+                      ],
+                    ],
                   ),
 
                   const SizedBox(height: 6),
 
-                  // BUSINESS TYPE (SECOND)
+                  // --------------------------------------------------------
+                  // Business type
+                  // --------------------------------------------------------
                   Text(
                     businessType,
                     maxLines: 1,
@@ -120,109 +126,33 @@ class CompanyCard extends StatelessWidget {
 
                   const SizedBox(height: 10),
 
-                  // META (clean + minimal)
-                  Row(
-                    children: [
-                      if (isVerified) ...[
-                        const Icon(
-                          Icons.verified_rounded,
-                          size: 15,
-                          color: Color(0xFF2563EB),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          "Verified",
-                          style: KhilonjiyaUI.sub.copyWith(
-                            fontSize: 12.0,
-                            fontWeight: FontWeight.w800,
-                            color: const Color(0xFF334155),
-                            height: 1.0,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                      ],
-                      if (rating > 0) ...[
-                        const Icon(
-                          Icons.star_rounded,
-                          size: 16,
-                          color: Color(0xFFF59E0B),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          rating.toStringAsFixed(1),
-                          style: KhilonjiyaUI.sub.copyWith(
-                            fontSize: 12.0,
-                            fontWeight: FontWeight.w800,
-                            color: const Color(0xFF334155),
-                            height: 1.0,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                      ],
-                      if (companySize.isNotEmpty) ...[
-                        const Icon(
-                          Icons.groups_rounded,
-                          size: 16,
-                          color: Color(0xFF64748B),
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            companySize,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: KhilonjiyaUI.sub.copyWith(
-                              fontSize: 12.0,
-                              fontWeight: FontWeight.w800,
-                              color: const Color(0xFF64748B),
-                              height: 1.0,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
+                  // --------------------------------------------------------
+                  // Jobs posted
+                  // --------------------------------------------------------
+                  Text(
+                    "${totalJobs <= 0 ? 0 : totalJobs} jobs posted",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: KhilonjiyaUI.sub.copyWith(
+                      fontSize: 12.2,
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFF94A3B8),
+                      height: 1.0,
+                    ),
                   ),
                 ],
               ),
             ),
 
-            const SizedBox(width: 12),
+            const SizedBox(width: 14),
 
             // ============================================================
-            // RIGHT: JOB COUNT (LIGHT ORANGE + SMALLER)
+            // RIGHT: BUSINESS TYPE LOGO
             // ============================================================
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  totalJobs <= 0 ? "0" : "$totalJobs",
-                  style: KhilonjiyaUI.cardTitle.copyWith(
-                    fontSize: 14.2,
-                    fontWeight: FontWeight.w900,
-                    color: const Color(0xFFF59E0B),
-                    height: 1.0,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  "jobs",
-                  style: KhilonjiyaUI.sub.copyWith(
-                    fontSize: 12.0,
-                    fontWeight: FontWeight.w800,
-                    color: const Color(0xFF94A3B8),
-                    height: 1.0,
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(width: 8),
-
-            const Icon(
-              Icons.arrow_forward_rounded,
-              size: 20,
-              color: KhilonjiyaUI.muted,
+            _BusinessTypeIcon(
+              businessType: businessType,
+              iconUrl: businessIconUrl,
+              size: _logoSize,
             ),
           ],
         ),
@@ -238,13 +168,6 @@ class CompanyCard extends StatelessWidget {
     if (v is int) return v;
     if (v is double) return v.toInt();
     return int.tryParse(v.toString()) ?? 0;
-  }
-
-  double _toDouble(dynamic v) {
-    if (v == null) return 0;
-    if (v is double) return v;
-    if (v is int) return v.toDouble();
-    return double.tryParse(v.toString()) ?? 0;
   }
 }
 
