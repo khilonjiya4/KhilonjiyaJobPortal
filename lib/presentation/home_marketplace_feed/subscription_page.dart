@@ -185,7 +185,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
       // 2) Open Razorpay checkout
       final options = {
-        "key": "rzp_test_REPLACE_LATER",
+        "key": "rzp_test_SGkM8xnibeJDru",
         "amount": order['amount'], // in paise (99900)
         "currency": "INR",
         "name": "Khilonjiya Pro",
