@@ -64,7 +64,6 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
       _prefillEmail = (user.email ?? "").trim();
 
-      // try from user_profiles
       final profile = await db
           .from('user_profiles')
           .select('mobile_number')
@@ -125,7 +124,6 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     setState(() => _paying = true);
 
     try {
-      // Reset old transaction id (important for retries)
       _transactionId = null;
 
       // 1) Create order from Supabase function
@@ -142,16 +140,12 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       }
 
       // 2) Open Razorpay checkout
-      //
-      // IMPORTANT:
-      // - key is your Razorpay Key ID (NOT secret)
-      // - for now keep dummy key, later replace with real key
       final options = {
         "key": "rzp_test_REPLACE_LATER",
         "amount": order['amount'], // in paise (99900)
         "currency": "INR",
         "name": "Khilonjiya Pro",
-        "description": "Monthly subscription (30 days)",
+        "description": "Pro subscription (30 days)",
         "order_id": razorpayOrderId,
         "prefill": {
           "contact": _prefillPhone,
@@ -230,9 +224,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          "Payment failed: ${response.message ?? "Cancelled"}",
-        ),
+        content: Text("Payment failed: ${response.message ?? "Cancelled"}"),
       ),
     );
   }
@@ -286,7 +278,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   }
 
   Widget _heroCard() {
-    final buttonText = _isActive ? "Renew Now" : "Subscribe Now";
+    final buttonText = _isActive ? "Extend / Renew" : "Subscribe Now";
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -342,7 +334,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
           const SizedBox(height: 6),
           Text(
             _isActive
-                ? "Your subscription is active for 30 days. You can renew anytime."
+                ? "Your subscription is active. You can extend it anytime by paying again."
                 : "Unlock premium job features designed to help you get more calls, more interviews, and better offers.",
             style: KhilonjiyaUI.sub.copyWith(
               fontSize: 13.2,
