@@ -1,3 +1,5 @@
+// File: lib/presentation/home_marketplace_feed/widgets/home_sections/profile_and_search_cards.dart
+
 import 'package:flutter/material.dart';
 import '../../../../core/ui/khilonjiya_ui.dart';
 
@@ -15,9 +17,9 @@ class ProfileAndSearchCards extends StatelessWidget {
   final VoidCallback? onProfileTap;
   final VoidCallback? onMissingDetailsTap; // kept for compatibility (not used now)
 
-  // ✅ SPLIT EVENTS (IMPORTANT)
-  final VoidCallback? onProfileViewAllTap; // left card "Complete Profile"
-  final VoidCallback? onJobsTodayViewAllTap; // right card "View all"
+  // ✅ FIX: Separate callbacks
+  final VoidCallback? onProfileViewAllTap; // left card view all (same as profile)
+  final VoidCallback? onJobsPostedTodayViewAllTap; // right card view all
 
   const ProfileAndSearchCards({
     Key? key,
@@ -29,39 +31,37 @@ class ProfileAndSearchCards extends StatelessWidget {
     this.onProfileTap,
     this.onMissingDetailsTap,
     this.onProfileViewAllTap,
-    this.onJobsTodayViewAllTap,
+    this.onJobsPostedTodayViewAllTap,
   }) : super(key: key);
 
-  // ------------------------------------------------------------
-  // NAME LOGIC
-  // ------------------------------------------------------------
-  bool _isFakeName(String name) {
+  bool _isFakeUserName(String name) {
     final n = name.trim().toLowerCase();
 
+    // empty -> fake
     if (n.isEmpty) return true;
-    if (n == "your profile") return true;
 
-    // Your fake pattern: user<mobile>
-    // Example: user9876543210
-    if (n.startsWith("user")) {
-      final rest = n.replaceFirst("user", "").trim();
-      final digitsOnly = RegExp(r'^\d{6,}$');
-      if (digitsOnly.hasMatch(rest)) return true;
-    }
+    // user<mobile> -> fake
+    // examples: user9876543210, user_9876543210, user 9876543210
+    if (n.startsWith("user")) return true;
+
+    // if only digits -> fake
+    if (RegExp(r'^\d+$').hasMatch(n)) return true;
 
     return false;
   }
 
-  String _profileTitle(String rawName) {
+  String _displayProfileTitle(String rawName) {
     final name = rawName.trim();
 
-    if (_isFakeName(name)) return "Your Profile";
+    if (_isFakeUserName(name)) {
+      return "Your Profile";
+    }
 
-    // Show: Pankaj's Profile
-    final first = name.split(" ").first.trim();
-    if (first.isEmpty) return "Your Profile";
+    // If name exists, show: Pankaj's Profile
+    final firstName = name.split(" ").first.trim();
+    if (firstName.isEmpty) return "Your Profile";
 
-    return "$first's Profile";
+    return "$firstName's Profile";
   }
 
   @override
@@ -69,7 +69,7 @@ class ProfileAndSearchCards extends StatelessWidget {
     final completion = profileCompletion.clamp(0, 100);
     final value = completion / 100.0;
 
-    final displayTitle = _profileTitle(profileName);
+    final profileTitle = _displayProfileTitle(profileName);
 
     return Row(
       children: [
@@ -114,9 +114,7 @@ class ProfileAndSearchCards extends StatelessWidget {
 
                   const SizedBox(height: 12),
 
-                  // ✅ NAME FIX
-                  Text(displayTitle, style: KhilonjiyaUI.cardTitle),
-
+                  Text(profileTitle, style: KhilonjiyaUI.cardTitle),
                   const SizedBox(height: 4),
                   Text(
                     lastUpdatedText,
@@ -169,8 +167,7 @@ class ProfileAndSearchCards extends StatelessWidget {
                 const Spacer(),
 
                 InkWell(
-                  // ✅ NEW EVENT
-                  onTap: onJobsTodayViewAllTap,
+                  onTap: onJobsPostedTodayViewAllTap,
                   child: Text("View all", style: KhilonjiyaUI.link),
                 ),
               ],
