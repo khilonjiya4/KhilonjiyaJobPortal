@@ -39,11 +39,7 @@ import 'widgets/home_sections/job_card_horizontal.dart';
 // ✅ NEW IMPORT
 import '../common/widgets/cards/company_card_horizontal.dart';
 
-// ✅ NEW IMPORTS (for drawer)
-import '../../services/subscription_service.dart';
-import 'subscription_page.dart';
-
-// ✅ NEW PAGE (created in File 4/4)
+// ✅ NEW PAGE
 import 'jobs_posted_today_page.dart';
 
 class HomeJobsFeed extends StatefulWidget {
@@ -57,9 +53,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   final JobSeekerHomeService _homeService = JobSeekerHomeService();
   final SupabaseClient _supabase = Supabase.instance.client;
 
-  // ✅ subscription service (to show Pro / Upgrade in drawer)
-  final SubscriptionService _subscriptionService = SubscriptionService();
-
   bool _isCheckingAuth = true;
   bool _isDisposed = false;
 
@@ -71,11 +64,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   String _lastUpdatedText = "Updated recently";
   int _missingDetails = 0;
   int _jobsPostedToday = 0;
-
-  // ------------------------------------------------------------
-  // PRO STATUS (for drawer UI)
-  // ------------------------------------------------------------
-  bool _isProActive = false;
 
   // ------------------------------------------------------------
   // NOTIFICATIONS
@@ -212,13 +200,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
       } catch (_) {
         _unreadNotifications = 0;
       }
-
-      // ✅ 8) Pro subscription check (for drawer)
-      try {
-        _isProActive = await _subscriptionService.isProActive();
-      } catch (_) {
-        _isProActive = false;
-      }
     } finally {
       if (!_isDisposed) {
         setState(() {
@@ -352,27 +333,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   }
 
   // ------------------------------------------------------------
-  // SUBSCRIPTION PAGE (DRAWER)
-  // ------------------------------------------------------------
-  Future<void> _openSubscriptionPage() async {
-    final _ = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const SubscriptionPage()),
-    );
-
-    // When returning, refresh Pro status (and drawer UI)
-    if (_isDisposed) return;
-
-    try {
-      final active = await _subscriptionService.isProActive();
-      if (!_isDisposed && mounted) {
-        setState(() => _isProActive = active);
-      }
-    } catch (_) {}
-  }
-
-  // ------------------------------------------------------------
-  // JOBS POSTED TODAY PAGE (RIGHT CARD VIEW ALL)
+  // JOBS POSTED TODAY
   // ------------------------------------------------------------
   void _openJobsPostedTodayPage() {
     Navigator.push(
@@ -592,13 +553,12 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
             lastUpdatedText: _lastUpdatedText,
             missingDetails: _missingDetails,
             jobsPostedToday: _jobsPostedToday,
-
-            // left card
             onProfileTap: _openProfileEditPage,
-            onProfileViewAllTap: _openProfileEditPage,
+            onMissingDetailsTap: _openProfileEditPage,
 
-            // right card
-            onJobsTodayViewAllTap: _openJobsPostedTodayPage,
+            // ✅ FIXED
+            onProfileViewAllTap: _openProfileEditPage,
+            onJobsPostedTodayViewAllTap: _openJobsPostedTodayPage,
           ),
           const SizedBox(height: 14),
 
@@ -782,8 +742,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
       drawer: NaukriDrawer(
         userName: _profileName,
         profileCompletion: _profileCompletion,
-        isProActive: _isProActive, // ✅ NEW
-        onUpgradeTap: _openSubscriptionPage, // ✅ NEW
         onClose: () => Navigator.pop(context),
       ),
       body: SafeArea(
