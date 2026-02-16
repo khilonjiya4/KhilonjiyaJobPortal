@@ -17,9 +17,10 @@ class JobCardWidget extends StatelessWidget {
     required this.onTap,
   }) : super(key: key);
 
-  // Fixed right column width so logo stays CENTERED under save
-  static const double _rightColumnWidth = 64;
   static const double _logoSize = 52;
+
+  // right overlay space so text never touches logo/bookmark
+  static const double _rightSafePadding = 78;
 
   @override
   Widget build(BuildContext context) {
@@ -74,7 +75,6 @@ class JobCardWidget extends StatelessWidget {
     if (companyMap is Map<String, dynamic>) {
       final bt = companyMap['business_types_master'];
 
-      // ✅ CORRECT KEYS (from your service)
       if (bt is Map<String, dynamic>) {
         businessType = (bt['type_name'] ?? '').toString().trim();
 
@@ -82,7 +82,6 @@ class JobCardWidget extends StatelessWidget {
         businessIconUrl = url.isEmpty ? null : url;
       }
 
-      // fallback: if you stored directly in companies
       if (businessType.isEmpty) {
         businessType = (companyMap['business_type'] ?? '').toString().trim();
       }
@@ -119,19 +118,18 @@ class JobCardWidget extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ============================================================
-            // HEADER
-            // LEFT: Title + Company
-            // RIGHT: Save (top-right) + Logo (centered below)
+            // HEADER (STACK FIX)
+            // - Left side uses full width
+            // - Right side is overlayed (no reserved gap)
             // ============================================================
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            Stack(
               children: [
-                // LEFT TEXT BLOCK
-                Expanded(
+                // LEFT TEXT BLOCK (FULL WIDTH)
+                Padding(
+                  padding: const EdgeInsets.only(right: _rightSafePadding),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // JOB TITLE (HIGHEST SIZE)
                       Text(
                         title.isEmpty ? "Job" : title,
                         maxLines: 1,
@@ -143,8 +141,6 @@ class JobCardWidget extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 6),
-
-                      // COMPANY NAME (MEDIUM SIZE)
                       Text(
                         company.isEmpty ? "Company" : company,
                         maxLines: 1,
@@ -160,45 +156,37 @@ class JobCardWidget extends StatelessWidget {
                   ),
                 ),
 
-                const SizedBox(width: 12),
-
-                // RIGHT COLUMN (FIXED WIDTH)
-                SizedBox(
-                  width: _rightColumnWidth,
+                // RIGHT SIDE (OVERLAYED)
+                Positioned(
+                  right: 0,
+                  top: 0,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      // SAVE (TOP RIGHT)
-                      Align(
-                        alignment: Alignment.topRight,
-                        child: InkWell(
-                          onTap: onSaveToggle,
-                          borderRadius: BorderRadius.circular(999),
-                          child: Padding(
-                            padding: const EdgeInsets.all(6),
-                            child: Icon(
-                              isSaved
-                                  ? Icons.bookmark_rounded
-                                  : Icons.bookmark_outline,
-                              size: 24,
-                              color: isSaved
-                                  ? KhilonjiyaUI.primary
-                                  : const Color(0xFF64748B),
-                            ),
+                      // SAVE
+                      InkWell(
+                        onTap: onSaveToggle,
+                        borderRadius: BorderRadius.circular(999),
+                        child: Padding(
+                          padding: const EdgeInsets.all(6),
+                          child: Icon(
+                            isSaved
+                                ? Icons.bookmark_rounded
+                                : Icons.bookmark_outline,
+                            size: 24,
+                            color: isSaved
+                                ? KhilonjiyaUI.primary
+                                : const Color(0xFF64748B),
                           ),
                         ),
                       ),
-
                       const SizedBox(height: 8),
 
-                      // LOGO (CENTERED BELOW SAVE)
-                      Align(
-                        alignment: Alignment.center,
-                        child: _BusinessTypeIcon(
-                          businessType: businessType,
-                          iconUrl: businessIconUrl,
-                          size: _logoSize,
-                        ),
+                      // LOGO
+                      _BusinessTypeIcon(
+                        businessType: businessType,
+                        iconUrl: businessIconUrl,
+                        size: _logoSize,
                       ),
                     ],
                   ),
@@ -208,9 +196,7 @@ class JobCardWidget extends StatelessWidget {
 
             const SizedBox(height: 14),
 
-            // ============================================================
             // LOCATION
-            // ============================================================
             _plainRow(
               icon: Icons.location_on_rounded,
               iconColor: const Color(0xFF2563EB),
@@ -219,9 +205,7 @@ class JobCardWidget extends StatelessWidget {
 
             const SizedBox(height: 8),
 
-            // ============================================================
             // EXPERIENCE
-            // ============================================================
             _plainRow(
               icon: Icons.work_rounded,
               iconColor: const Color(0xFF7C3AED),
@@ -230,18 +214,14 @@ class JobCardWidget extends StatelessWidget {
 
             const SizedBox(height: 8),
 
-            // ============================================================
             // SALARY
-            // ============================================================
             _plainRow(
               icon: Icons.currency_rupee_rounded,
               iconColor: const Color(0xFF16A34A),
               text: salaryText,
             ),
 
-            // ============================================================
             // TAGS
-            // ============================================================
             if (isInternship || isWalkIn) ...[
               const SizedBox(height: 12),
               Wrap(
@@ -265,9 +245,7 @@ class JobCardWidget extends StatelessWidget {
 
             const SizedBox(height: 14),
 
-            // ============================================================
             // FOOTER
-            // ============================================================
             Row(
               children: [
                 Text(
@@ -435,7 +413,6 @@ class JobCardWidget extends StatelessWidget {
       range = "Up to ${mx!}";
     }
 
-    // keep monthly text (your schema is monthly default)
     return "$range per month";
   }
 
@@ -507,8 +484,6 @@ class JobCardWidget extends StatelessWidget {
 
 // ============================================================
 // BUSINESS TYPE ICON
-// - Uses business_types_master.logo_url
-// - Else first letter of business type
 // ============================================================
 class _BusinessTypeIcon extends StatelessWidget {
   final String businessType;
