@@ -1,5 +1,3 @@
-// File: lib/presentation/common/widgets/cards/job_card_widget.dart
-
 import 'package:flutter/material.dart';
 import '../../../../core/ui/khilonjiya_ui.dart';
 
@@ -18,9 +16,7 @@ class JobCardWidget extends StatelessWidget {
   }) : super(key: key);
 
   static const double _logoSize = 52;
-
-  // right side fixed column width (same concept as horizontal)
-  static const double _rightColumnWidth = 72;
+  static const double _rightColumnWidth = 74;
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +27,6 @@ class JobCardWidget extends StatelessWidget {
 
     // joined companies
     final companyMap = job['companies'];
-
     final companyName = (companyMap is Map<String, dynamic>)
         ? (companyMap['name'] ?? '').toString().trim()
         : '';
@@ -74,8 +69,8 @@ class JobCardWidget extends StatelessWidget {
     String? businessIconUrl;
 
     if (companyMap is Map<String, dynamic>) {
-      // 1) Preferred: business_types_master join
       final bt = companyMap['business_types_master'];
+
       if (bt is Map<String, dynamic>) {
         final name = (bt['type_name'] ?? '').toString().trim();
         if (name.isNotEmpty) businessType = name;
@@ -84,7 +79,7 @@ class JobCardWidget extends StatelessWidget {
         businessIconUrl = url.isEmpty ? null : url;
       }
 
-      // 2) fallback name
+      // fallback
       if (businessType.trim().isEmpty) {
         final fallback =
             (companyMap['industry'] ?? companyMap['business_type'] ?? '')
@@ -93,16 +88,10 @@ class JobCardWidget extends StatelessWidget {
         if (fallback.isNotEmpty) businessType = fallback;
       }
 
-      // 3) fallback logo from companies table
+      // fallback if logo stored directly in companies
       if (businessIconUrl == null) {
-        final url1 = (companyMap['logo_url'] ?? '').toString().trim();
-        if (url1.isNotEmpty) businessIconUrl = url1;
-      }
-
-      // 4) fallback logo custom
-      if (businessIconUrl == null) {
-        final url2 = (companyMap['business_icon_url'] ?? '').toString().trim();
-        if (url2.isNotEmpty) businessIconUrl = url2;
+        final url = (companyMap['logo_url'] ?? '').toString().trim();
+        businessIconUrl = url.isEmpty ? null : url;
       }
     }
 
@@ -133,7 +122,7 @@ class JobCardWidget extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ============================================================
-            // HEADER (FIXED LAYOUT LIKE HORIZONTAL)
+            // HEADER ROW (FIXED)
             // ============================================================
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -171,32 +160,35 @@ class JobCardWidget extends StatelessWidget {
 
                 const SizedBox(width: 12),
 
-                // RIGHT SIDE (BOOKMARK TOP + LOGO BELOW)
+                // RIGHT COLUMN (bookmark top, logo centered)
                 SizedBox(
                   width: _rightColumnWidth,
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      InkWell(
-                        onTap: onSaveToggle,
-                        borderRadius: BorderRadius.circular(999),
-                        child: Padding(
-                          padding: const EdgeInsets.all(6),
-                          child: Icon(
-                            isSaved
-                                ? Icons.bookmark_rounded
-                                : Icons.bookmark_outline,
-                            size: 24,
-                            color: isSaved
-                                ? KhilonjiyaUI.primary
-                                : const Color(0xFF64748B),
+                      Align(
+                        alignment: Alignment.topRight,
+                        child: InkWell(
+                          onTap: onSaveToggle,
+                          borderRadius: BorderRadius.circular(999),
+                          child: Padding(
+                            padding: const EdgeInsets.all(6),
+                            child: Icon(
+                              isSaved
+                                  ? Icons.bookmark_rounded
+                                  : Icons.bookmark_outline,
+                              size: 24,
+                              color: isSaved
+                                  ? KhilonjiyaUI.primary
+                                  : const Color(0xFF64748B),
+                            ),
                           ),
                         ),
                       ),
+
                       const SizedBox(height: 10),
 
-                      Align(
-                        alignment: Alignment.centerRight,
+                      // Logo centered in remaining space
+                      Center(
                         child: _BusinessTypeIcon(
                           businessType: businessType,
                           iconUrl: businessIconUrl,
