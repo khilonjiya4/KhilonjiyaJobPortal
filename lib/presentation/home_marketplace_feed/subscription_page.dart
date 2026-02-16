@@ -25,6 +25,10 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   bool _paying = false;
 
   bool _isActive = false;
+  bool _isExpired = false;
+
+  DateTime? _expiresAt;
+  int _daysLeft = 0;
 
   // Prefill
   String _prefillEmail = "";
@@ -90,7 +94,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   }
 
   // ============================================================
-  // LOAD SUBSCRIPTION STATUS
+  // LOAD SUBSCRIPTION STATUS (ACTIVE / EXPIRED / NONE)
   // ============================================================
   Future<void> _loadSubscription() async {
     if (!mounted) return;
@@ -98,11 +102,48 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     setState(() => _loading = true);
 
     try {
-      final active = await _subscriptionService.isProActive();
+      final sub = await _subscriptionService.getMySubscription();
+
       if (!mounted) return;
+
+      if (sub == null) {
+        setState(() {
+          _isActive = false;
+          _isExpired = false;
+          _expiresAt = null;
+          _daysLeft = 0;
+          _loading = false;
+        });
+        return;
+      }
+
+      final status = (sub['status'] ?? '').toString();
+      final expiresRaw = sub['expires_at'];
+
+      final expires = expiresRaw == null
+          ? null
+          : DateTime.tryParse(expiresRaw.toString());
+
+      final now = DateTime.now();
+
+      final active = status == "active" &&
+          expires != null &&
+          expires.isAfter(now);
+
+      final expired = status == "active" &&
+          expires != null &&
+          expires.isBefore(now);
+
+      int daysLeft = 0;
+      if (expires != null && expires.isAfter(now)) {
+        daysLeft = expires.difference(now).inDays;
+      }
 
       setState(() {
         _isActive = active;
+        _isExpired = expired;
+        _expiresAt = expires;
+        _daysLeft = daysLeft;
         _loading = false;
       });
     } catch (_) {
@@ -110,6 +151,9 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
       setState(() {
         _isActive = false;
+        _isExpired = false;
+        _expiresAt = null;
+        _daysLeft = 0;
         _loading = false;
       });
     }
@@ -278,7 +322,15 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   }
 
   Widget _heroCard() {
-    final buttonText = _isActive ? "Extend / Renew" : "Subscribe Now";
+    final buttonText = _isActive
+        ? "Extend / Renew"
+        : (_isExpired ? "Renew Now" : "Subscribe Now");
+
+    final subtitle = _isActive
+        ? "Active • $_daysLeft days left"
+        : (_isExpired
+            ? "Expired • Renew now to activate Pro again"
+            : "Unlock premium job features designed to help you get more calls, more interviews, and better offers.");
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -333,9 +385,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
           ),
           const SizedBox(height: 6),
           Text(
-            _isActive
-                ? "Your subscription is active. You can extend it anytime by paying again."
-                : "Unlock premium job features designed to help you get more calls, more interviews, and better offers.",
+            subtitle,
             style: KhilonjiyaUI.sub.copyWith(
               fontSize: 13.2,
               height: 1.35,
