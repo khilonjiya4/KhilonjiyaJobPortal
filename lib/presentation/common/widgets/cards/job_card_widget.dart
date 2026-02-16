@@ -17,6 +17,10 @@ class JobCardWidget extends StatelessWidget {
     required this.onTap,
   }) : super(key: key);
 
+  // Fixed right column width so logo stays CENTERED under save
+  static const double _rightColumnWidth = 64;
+  static const double _logoSize = 52;
+
   @override
   Widget build(BuildContext context) {
     // ------------------------------------------------------------
@@ -62,22 +66,23 @@ class JobCardWidget extends StatelessWidget {
 
     // ------------------------------------------------------------
     // BUSINESS TYPE (Option A)
-    // companies.business_types_master.name + icon_url
+    // companies.business_types_master.type_name + logo_url
     // ------------------------------------------------------------
     String businessType = '';
     String? businessIconUrl;
 
     if (companyMap is Map<String, dynamic>) {
-      // preferred: nested join
       final bt = companyMap['business_types_master'];
 
+      // ✅ CORRECT KEYS (from your service)
       if (bt is Map<String, dynamic>) {
-        businessType = (bt['name'] ?? '').toString().trim();
-        final url = (bt['icon_url'] ?? '').toString().trim();
+        businessType = (bt['type_name'] ?? '').toString().trim();
+
+        final url = (bt['logo_url'] ?? '').toString().trim();
         businessIconUrl = url.isEmpty ? null : url;
       }
 
-      // fallback: if you store directly in companies
+      // fallback: if you stored directly in companies
       if (businessType.isEmpty) {
         businessType = (companyMap['business_type'] ?? '').toString().trim();
       }
@@ -86,6 +91,8 @@ class JobCardWidget extends StatelessWidget {
         businessIconUrl = url.isEmpty ? null : url;
       }
     }
+
+    if (businessType.isEmpty) businessType = "Business";
 
     // ------------------------------------------------------------
     // UI
@@ -112,7 +119,9 @@ class JobCardWidget extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ============================================================
-            // HEADER (LEFT TEXT + RIGHT BUSINESS ICON + SAVE)
+            // HEADER
+            // LEFT: Title + Company
+            // RIGHT: Save (top-right) + Logo (centered below)
             // ============================================================
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -153,31 +162,45 @@ class JobCardWidget extends StatelessWidget {
 
                 const SizedBox(width: 12),
 
-                // RIGHT ICON (BUSINESS TYPE)
-                _BusinessTypeIcon(
-                  businessType: businessType,
-                  iconUrl: businessIconUrl,
-                  // NOTE:
-                  // Vertical card height is NOT fixed.
-                  // So we keep a clean fixed size.
-                  size: 52,
-                ),
+                // RIGHT COLUMN (FIXED WIDTH)
+                SizedBox(
+                  width: _rightColumnWidth,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      // SAVE (TOP RIGHT)
+                      Align(
+                        alignment: Alignment.topRight,
+                        child: InkWell(
+                          onTap: onSaveToggle,
+                          borderRadius: BorderRadius.circular(999),
+                          child: Padding(
+                            padding: const EdgeInsets.all(6),
+                            child: Icon(
+                              isSaved
+                                  ? Icons.bookmark_rounded
+                                  : Icons.bookmark_outline,
+                              size: 24,
+                              color: isSaved
+                                  ? KhilonjiyaUI.primary
+                                  : const Color(0xFF64748B),
+                            ),
+                          ),
+                        ),
+                      ),
 
-                const SizedBox(width: 8),
+                      const SizedBox(height: 8),
 
-                // SAVE
-                InkWell(
-                  onTap: onSaveToggle,
-                  borderRadius: BorderRadius.circular(999),
-                  child: Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: Icon(
-                      isSaved ? Icons.bookmark_rounded : Icons.bookmark_outline,
-                      size: 24,
-                      color: isSaved
-                          ? KhilonjiyaUI.primary
-                          : const Color(0xFF64748B),
-                    ),
+                      // LOGO (CENTERED BELOW SAVE)
+                      Align(
+                        alignment: Alignment.center,
+                        child: _BusinessTypeIcon(
+                          businessType: businessType,
+                          iconUrl: businessIconUrl,
+                          size: _logoSize,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -217,7 +240,7 @@ class JobCardWidget extends StatelessWidget {
             ),
 
             // ============================================================
-            // TAGS (META SIZE)
+            // TAGS
             // ============================================================
             if (isInternship || isWalkIn) ...[
               const SizedBox(height: 12),
@@ -243,7 +266,7 @@ class JobCardWidget extends StatelessWidget {
             const SizedBox(height: 14),
 
             // ============================================================
-            // FOOTER (POSTED AGO ALWAYS BOTTOM LINE)
+            // FOOTER
             // ============================================================
             Row(
               children: [
@@ -483,7 +506,9 @@ class JobCardWidget extends StatelessWidget {
 }
 
 // ============================================================
-// RIGHT ICON (BUSINESS TYPE)
+// BUSINESS TYPE ICON
+// - Uses business_types_master.logo_url
+// - Else first letter of business type
 // ============================================================
 class _BusinessTypeIcon extends StatelessWidget {
   final String businessType;
