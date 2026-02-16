@@ -65,7 +65,7 @@ class SubscriptionService {
     final uid = _uid();
 
     final res = await _db.functions.invoke(
-      'razorpay_create_order',
+      'create-razorpay-order', // ✅ UPDATED FUNCTION NAME
       body: {
         "user_id": uid,
         "plan_key": planKey,
@@ -95,13 +95,13 @@ class SubscriptionService {
     final uid = _uid();
 
     final res = await _db.functions.invoke(
-      'verify-razorpay-payment', // ✅ OPTION B
+      'verify-razorpay-payment', // ✅ YOUR EDGE FUNCTION
       body: {
         "transaction_id": transactionId,
         "razorpay_order_id": razorpayOrderId,
         "razorpay_payment_id": razorpayPaymentId,
         "razorpay_signature": razorpaySignature,
-        "user_id": uid, // ✅ REQUIRED by your edge function
+        "user_id": uid,
       },
     );
 
