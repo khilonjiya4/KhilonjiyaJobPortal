@@ -1,5 +1,3 @@
-// File: lib/presentation/home_marketplace_feed/widgets/home_sections/profile_and_search_cards.dart
-
 import 'package:flutter/material.dart';
 import '../../../../core/ui/khilonjiya_ui.dart';
 
@@ -16,7 +14,10 @@ class ProfileAndSearchCards extends StatelessWidget {
   // EVENTS
   final VoidCallback? onProfileTap;
   final VoidCallback? onMissingDetailsTap; // kept for compatibility (not used now)
-  final VoidCallback? onViewAllTap;
+
+  // ✅ SPLIT EVENTS (IMPORTANT)
+  final VoidCallback? onProfileViewAllTap; // left card "Complete Profile"
+  final VoidCallback? onJobsTodayViewAllTap; // right card "View all"
 
   const ProfileAndSearchCards({
     Key? key,
@@ -27,13 +28,48 @@ class ProfileAndSearchCards extends StatelessWidget {
     required this.jobsPostedToday,
     this.onProfileTap,
     this.onMissingDetailsTap,
-    this.onViewAllTap,
+    this.onProfileViewAllTap,
+    this.onJobsTodayViewAllTap,
   }) : super(key: key);
+
+  // ------------------------------------------------------------
+  // NAME LOGIC
+  // ------------------------------------------------------------
+  bool _isFakeName(String name) {
+    final n = name.trim().toLowerCase();
+
+    if (n.isEmpty) return true;
+    if (n == "your profile") return true;
+
+    // Your fake pattern: user<mobile>
+    // Example: user9876543210
+    if (n.startsWith("user")) {
+      final rest = n.replaceFirst("user", "").trim();
+      final digitsOnly = RegExp(r'^\d{6,}$');
+      if (digitsOnly.hasMatch(rest)) return true;
+    }
+
+    return false;
+  }
+
+  String _profileTitle(String rawName) {
+    final name = rawName.trim();
+
+    if (_isFakeName(name)) return "Your Profile";
+
+    // Show: Pankaj's Profile
+    final first = name.split(" ").first.trim();
+    if (first.isEmpty) return "Your Profile";
+
+    return "$first's Profile";
+  }
 
   @override
   Widget build(BuildContext context) {
     final completion = profileCompletion.clamp(0, 100);
     final value = completion / 100.0;
+
+    final displayTitle = _profileTitle(profileName);
 
     return Row(
       children: [
@@ -78,7 +114,9 @@ class ProfileAndSearchCards extends StatelessWidget {
 
                   const SizedBox(height: 12),
 
-                  Text(profileName, style: KhilonjiyaUI.cardTitle),
+                  // ✅ NAME FIX
+                  Text(displayTitle, style: KhilonjiyaUI.cardTitle),
+
                   const SizedBox(height: 4),
                   Text(
                     lastUpdatedText,
@@ -90,7 +128,7 @@ class ProfileAndSearchCards extends StatelessWidget {
                   const Spacer(),
 
                   InkWell(
-                    onTap: onProfileTap,
+                    onTap: onProfileViewAllTap ?? onProfileTap,
                     child: Text(
                       "Complete Profile",
                       style: KhilonjiyaUI.link,
@@ -113,16 +151,14 @@ class ProfileAndSearchCards extends StatelessWidget {
                 Text(
                   "$jobsPostedToday",
                   style: KhilonjiyaUI.h1.copyWith(
-                    fontSize: 26, // smaller than before
+                    fontSize: 26,
                     fontWeight: FontWeight.w800,
-                    color: const Color(0xFFF59E0B), // light orange
+                    color: const Color(0xFFF59E0B),
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text("Jobs posted today", style: KhilonjiyaUI.cardTitle),
                 const SizedBox(height: 4),
-
-                // Removed: "All India • Active only"
                 Text(
                   "Active only",
                   maxLines: 1,
@@ -133,7 +169,8 @@ class ProfileAndSearchCards extends StatelessWidget {
                 const Spacer(),
 
                 InkWell(
-                  onTap: onViewAllTap,
+                  // ✅ NEW EVENT
+                  onTap: onJobsTodayViewAllTap,
                   child: Text("View all", style: KhilonjiyaUI.link),
                 ),
               ],
@@ -147,7 +184,6 @@ class ProfileAndSearchCards extends StatelessWidget {
   // ------------------------------------------------------------
   // UI HELPERS
   // ------------------------------------------------------------
-
   Widget _fixedHeightCard({required Widget child}) {
     return Container(
       height: 164,
