@@ -1,3 +1,4 @@
+<!-- File: android/app/src/main/AndroidManifest.xml -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     package="com.khilonjiya.marketplace">
@@ -25,7 +26,7 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
-    <!-- Android 13+ permissions (THIS IS IMPORTANT FOR PHOTO PICK) -->
+    <!-- Android 13+ permissions (important for photo picker) -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
 
     <!-- Other -->
@@ -53,10 +54,12 @@
             android:name="com.google.android.gms.auth.api.credentials.CREDENTIALS_API_ENABLED"
             android:value="true" />
 
+        <!-- Flutter embedding -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
 
+        <!-- Disable impeller (as you already had) -->
         <meta-data
             android:name="io.flutter.embedding.android.EnableImpeller"
             android:value="false" />
