@@ -347,10 +347,8 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
     if (result == null) return;
     if (!mounted) return;
 
-    // Update instantly
     setState(() => _expectedSalaryPerMonth = result);
 
-    // Also refresh from DB once
     try {
       final fresh = await _homeService.getExpectedSalaryPerMonth();
       if (!_isDisposed && mounted) {
@@ -568,7 +566,9 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
           ),
           const SizedBox(height: 18),
 
+          // ============================================================
           // RECOMMENDED
+          // ============================================================
           SectionHeader(
             title: "Recommended jobs",
             ctaText: "View all",
@@ -586,8 +586,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
                 return JobCardHorizontal(
                   job: job,
-                  isSaved: _savedJobIds.contains(job['id'].toString()),
-                  onSaveToggle: () => _toggleSaveJob(job['id'].toString()),
                   onTap: () => _openJobDetails(job),
                 );
               },
@@ -596,7 +594,9 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
           const SizedBox(height: 18),
 
+          // ============================================================
           // LATEST
+          // ============================================================
           SectionHeader(
             title: "Latest jobs",
             ctaText: "View all",
@@ -614,8 +614,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
                 return JobCardHorizontal(
                   job: job,
-                  isSaved: _savedJobIds.contains(job['id'].toString()),
-                  onSaveToggle: () => _toggleSaveJob(job['id'].toString()),
                   onTap: () => _openJobDetails(job),
                 );
               },
@@ -624,7 +622,9 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
           const SizedBox(height: 18),
 
+          // ============================================================
           // NEARBY
+          // ============================================================
           SectionHeader(
             title: "Jobs nearby",
             ctaText: "View all",
@@ -642,8 +642,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
                 return JobCardHorizontal(
                   job: job,
-                  isSaved: _savedJobIds.contains(job['id'].toString()),
-                  onSaveToggle: () => _toggleSaveJob(job['id'].toString()),
                   onTap: () => _openJobDetails(job),
                 );
               },
@@ -652,7 +650,9 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
           const SizedBox(height: 18),
 
+          // ============================================================
           // TOP COMPANIES
+          // ============================================================
           SectionHeader(
             title: "Top companies",
             ctaText: "View all",
