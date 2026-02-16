@@ -1,12 +1,10 @@
 // File: lib/presentation/home_marketplace_feed/subscription_page.dart
 
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 import '../../core/ui/khilonjiya_ui.dart';
-import '../../services/job_seeker_home_service.dart';
+import '../../services/subscription_service.dart';
 
 class SubscriptionPage extends StatefulWidget {
   const SubscriptionPage({Key? key}) : super(key: key);
@@ -18,206 +16,196 @@ class SubscriptionPage extends StatefulWidget {
 }
 
 class _SubscriptionPageState extends State<SubscriptionPage> {
-  final JobSeekerHomeService _service = JobSeekerHomeService();
+  final SubscriptionService _subscriptionService = SubscriptionService();
 
   Razorpay? _razorpay;
 
   bool _loading = true;
-  bool _isProActive = false;
-
   bool _paying = false;
 
-  // For verifying after payment
-  String? _lastOrderId;
+  bool _isActive = false;
+
+  // Needed for verification after Razorpay returns
+  String? _transactionId;
+  String? _razorpayOrderId;
 
   @override
   void initState() {
     super.initState();
-    _setupRazorpay();
-    _loadSubscriptionStatus();
-  }
-
-  void _setupRazorpay() {
-    _razorpay = Razorpay();
-
-    _razorpay!.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
-    _razorpay!.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
-    _razorpay!.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+    _initRazorpay();
+    _loadSubscription();
   }
 
   @override
   void dispose() {
-    try {
-      _razorpay?.clear();
-    } catch (_) {}
+    _razorpay?.clear();
     super.dispose();
   }
 
-  Future<void> _loadSubscriptionStatus() async {
+  // ============================================================
+  // INIT RAZORPAY
+  // ============================================================
+  void _initRazorpay() {
+    _razorpay = Razorpay();
+
+    _razorpay!.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
+    _razorpay!.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
+    _razorpay!.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
+  }
+
+  // ============================================================
+  // LOAD SUBSCRIPTION STATUS
+  // ============================================================
+  Future<void> _loadSubscription() async {
     setState(() {
       _loading = true;
     });
 
     try {
-      final active = await _service.isProActive();
+      final active = await _subscriptionService.isProActive();
       if (!mounted) return;
 
       setState(() {
-        _isProActive = active;
+        _isActive = active;
         _loading = false;
       });
     } catch (_) {
       if (!mounted) return;
 
       setState(() {
-        _isProActive = false;
+        _isActive = false;
         _loading = false;
       });
     }
   }
 
+  // ============================================================
+  // START PAYMENT FLOW
+  // ============================================================
   Future<void> _startPayment() async {
     if (_paying) return;
 
-    setState(() {
-      _paying = true;
-    });
+    setState(() => _paying = true);
 
     try {
-      // 1) Create order from Edge Function
-      final order = await _service.createProOrder(
+      // 1) Create order from Supabase function
+      final order = await _subscriptionService.createOrder(
         amountRupees: SubscriptionPage.price,
-        planKey: 'pro_monthly',
+        planKey: "pro_monthly",
       );
 
-      final orderId = (order['order_id'] ?? '').toString().trim();
-      final keyId = (order['key_id'] ?? '').toString().trim();
+      _transactionId = order['transaction_id']?.toString();
+      _razorpayOrderId = order['order_id']?.toString();
 
-      if (orderId.isEmpty || keyId.isEmpty) {
-        throw Exception("Invalid order response");
+      if (_transactionId == null || _razorpayOrderId == null) {
+        throw Exception("Order creation returned invalid response");
       }
 
-      _lastOrderId = orderId;
-
       // 2) Open Razorpay checkout
+      //
+      // IMPORTANT:
+      // - key is your Razorpay Key ID (NOT secret)
+      // - for now keep dummy key, later you will replace
       final options = {
-        'key': keyId,
-        'amount': SubscriptionPage.price * 100, // in paise
-        'currency': 'INR',
-        'name': 'Khilonjiya Pro',
-        'description': 'Pro Subscription (30 days)',
-        'order_id': orderId,
-        'timeout': 180,
-        'prefill': {
-          'contact': '',
-          'email': '',
+        "key": "rzp_test_REPLACE_LATER",
+        "amount": order['amount'], // in paise (99900)
+        "currency": "INR",
+        "name": "Khilonjiya Pro",
+        "description": "Monthly subscription",
+        "order_id": _razorpayOrderId,
+        "prefill": {
+          "contact": "",
+          "email": "",
         },
-        'theme': {
-          'color': '#FF6A00',
+        "theme": {
+          "color": "#0EA5E9",
         },
-        'retry': {'enabled': true, 'max_count': 1},
+        "method": {
+          "upi": true,
+          "card": true,
+          "netbanking": true,
+          "wallet": true,
+        }
       };
 
       _razorpay!.open(options);
     } catch (e) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Payment failed: $e"),
-        ),
-      );
+      setState(() => _paying = false);
 
-      setState(() {
-        _paying = false;
-      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Payment start failed: $e")),
+      );
     }
   }
 
   // ============================================================
   // RAZORPAY CALLBACKS
   // ============================================================
-
-  Future<void> _handlePaymentSuccess(PaymentSuccessResponse response) async {
+  Future<void> _onPaymentSuccess(PaymentSuccessResponse response) async {
     try {
-      final orderId = response.orderId?.trim() ?? _lastOrderId ?? '';
-      final paymentId = response.paymentId?.trim() ?? '';
-      final signature = response.signature?.trim() ?? '';
+      final txId = _transactionId;
+      final orderId = response.orderId;
+      final paymentId = response.paymentId;
+      final signature = response.signature;
 
-      if (orderId.isEmpty || paymentId.isEmpty || signature.isEmpty) {
-        throw Exception("Payment success but missing details");
+      if (txId == null ||
+          orderId == null ||
+          paymentId == null ||
+          signature == null) {
+        throw Exception("Missing Razorpay payment response fields");
       }
 
-      // 3) Verify payment on server
-      final ok = await _service.verifyProPayment(
+      // 3) Verify payment using Supabase function
+      await _subscriptionService.verifyPayment(
+        transactionId: txId,
         razorpayOrderId: orderId,
         razorpayPaymentId: paymentId,
         razorpaySignature: signature,
-        amountRupees: SubscriptionPage.price,
-        planKey: 'pro_monthly',
       );
 
       if (!mounted) return;
 
-      if (!ok) {
-        throw Exception("Payment verification failed");
-      }
+      // 4) Reload subscription status
+      await _loadSubscription();
 
-      // 4) Refresh subscription status
-      await _loadSubscriptionStatus();
-
-      if (!mounted) return;
+      setState(() => _paying = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Subscription Activated"),
-        ),
+        const SnackBar(content: Text("Subscription Activated")),
       );
     } catch (e) {
       if (!mounted) return;
 
+      setState(() => _paying = false);
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Payment verification failed: $e"),
-        ),
+        SnackBar(content: Text("Payment verification failed: $e")),
       );
-    } finally {
-      if (!mounted) return;
-      setState(() {
-        _paying = false;
-      });
     }
   }
 
-  void _handlePaymentError(PaymentFailureResponse response) {
+  void _onPaymentError(PaymentFailureResponse response) {
     if (!mounted) return;
 
-    setState(() {
-      _paying = false;
-    });
-
-    final msg = response.message?.toString().trim();
-    final code = response.code?.toString().trim();
+    setState(() => _paying = false);
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          msg == null || msg.isEmpty
-              ? "Payment failed (code: $code)"
-              : "Payment failed: $msg",
+          "Payment failed: ${response.message ?? "Cancelled"}",
         ),
       ),
     );
   }
 
-  void _handleExternalWallet(ExternalWalletResponse response) {
+  void _onExternalWallet(ExternalWalletResponse response) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          "External wallet selected: ${response.walletName ?? ''}",
-        ),
+        content: Text("External wallet: ${response.walletName ?? ""}"),
       ),
     );
   }
@@ -225,7 +213,6 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   // ============================================================
   // UI
   // ============================================================
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -239,98 +226,22 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
           style: TextStyle(fontWeight: FontWeight.w900),
         ),
         centerTitle: false,
-        actions: [
-          IconButton(
-            onPressed: _loading ? null : _loadSubscriptionStatus,
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-        ],
       ),
       body: _loading
-          ? const Center(
-              child: CircularProgressIndicator(),
-            )
+          ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
               children: [
-                _isProActive ? _activeCard() : _heroCard(),
-
+                _heroCard(),
                 const SizedBox(height: 16),
-
-                // ------------------------------------------------------------
-                // FEATURES
-                // ------------------------------------------------------------
-                Text(
-                  "What you get",
-                  style: KhilonjiyaUI.hTitle.copyWith(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 10),
-
-                _featureCard(
-                  icon: Icons.bolt_rounded,
-                  title: "Priority applications",
-                  subtitle:
-                      "Your profile is shown higher to employers for faster callbacks.",
-                ),
-                _featureCard(
-                  icon: Icons.verified_rounded,
-                  title: "Verified job access",
-                  subtitle:
-                      "Get access to premium and verified employer listings.",
-                ),
-                _featureCard(
-                  icon: Icons.support_agent_rounded,
-                  title: "Job support assistance",
-                  subtitle:
-                      "Get help in finding suitable jobs based on your profile and skills.",
-                ),
-                _featureCard(
-                  icon: Icons.lock_open_rounded,
-                  title: "Unlock premium jobs",
-                  subtitle:
-                      "Apply to exclusive jobs that are available only to Pro users.",
-                ),
-
+                _featuresSection(),
                 const SizedBox(height: 18),
-
-                // ------------------------------------------------------------
-                // FAQ
-                // ------------------------------------------------------------
-                Text(
-                  "FAQs",
-                  style: KhilonjiyaUI.hTitle.copyWith(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 10),
-
-                _faqTile(
-                  title: "Is this subscription refundable?",
-                  answer:
-                      "Currently subscriptions are non-refundable. You can cancel anytime and your plan will remain active till the end of the billing cycle.",
-                ),
-                _faqTile(
-                  title: "Will I definitely get a job?",
-                  answer:
-                      "No service can guarantee a job. Pro increases visibility and improves your chances of getting more calls from employers.",
-                ),
-                _faqTile(
-                  title: "Can I cancel anytime?",
-                  answer:
-                      "Yes. You can cancel anytime by contacting support. (Manual renewal system)",
-                ),
+                _faqSection(),
               ],
             ),
     );
   }
 
-  // ------------------------------------------------------------
-  // HERO CARD (INACTIVE)
-  // ------------------------------------------------------------
   Widget _heroCard() {
     return Container(
       padding: const EdgeInsets.all(18),
@@ -353,25 +264,31 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
-              color: KhilonjiyaUI.primary.withOpacity(0.08),
+              color: _isActive
+                  ? Colors.green.withOpacity(0.10)
+                  : KhilonjiyaUI.primary.withOpacity(0.08),
               borderRadius: BorderRadius.circular(999),
               border: Border.all(
-                color: KhilonjiyaUI.primary.withOpacity(0.12),
+                color: _isActive
+                    ? Colors.green.withOpacity(0.25)
+                    : KhilonjiyaUI.primary.withOpacity(0.12),
               ),
             ),
             child: Text(
-              "KHILONJIYA PRO",
+              _isActive ? "SUBSCRIPTION ACTIVE" : "KHILONJIYA PRO",
               style: KhilonjiyaUI.sub.copyWith(
                 fontSize: 12,
                 fontWeight: FontWeight.w900,
-                color: KhilonjiyaUI.primary,
+                color: _isActive ? Colors.green : KhilonjiyaUI.primary,
                 letterSpacing: 0.4,
               ),
             ),
           ),
+
           const SizedBox(height: 14),
+
           Text(
-            "Get hired faster",
+            _isActive ? "You are a Pro user" : "Get hired faster",
             style: KhilonjiyaUI.hTitle.copyWith(
               fontSize: 20,
               fontWeight: FontWeight.w900,
@@ -379,7 +296,9 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
           ),
           const SizedBox(height: 6),
           Text(
-            "Unlock premium job features designed to help you get more calls, more interviews, and better offers.",
+            _isActive
+                ? "Your subscription is active for 30 days. You can renew anytime."
+                : "Unlock premium job features designed to help you get more calls, more interviews, and better offers.",
             style: KhilonjiyaUI.sub.copyWith(
               fontSize: 13.2,
               height: 1.35,
@@ -387,6 +306,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
               fontWeight: FontWeight.w700,
             ),
           ),
+
           const SizedBox(height: 18),
 
           // Price Row
@@ -404,7 +324,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Text(
-                  "/ 30 days",
+                  "/ month",
                   style: KhilonjiyaUI.sub.copyWith(
                     fontSize: 14,
                     color: const Color(0xFF64748B),
@@ -417,30 +337,33 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
           const SizedBox(height: 16),
 
+          // CTA
           SizedBox(
             width: double.infinity,
             height: 52,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: KhilonjiyaUI.primary,
+                backgroundColor: _isActive
+                    ? const Color(0xFF16A34A)
+                    : KhilonjiyaUI.primary,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
                 ),
                 elevation: 0,
               ),
-              onPressed: _paying ? null : _startPayment,
+              onPressed: _isActive ? null : _startPayment,
               child: _paying
                   ? const SizedBox(
                       width: 22,
                       height: 22,
                       child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
+                        strokeWidth: 2.6,
                         color: Colors.white,
                       ),
                     )
-                  : const Text(
-                      "Subscribe Now",
-                      style: TextStyle(
+                  : Text(
+                      _isActive ? "Subscription Active" : "Subscribe Now",
+                      style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w900,
                         color: Colors.white,
@@ -453,7 +376,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
           Center(
             child: Text(
-              "Manual renewal • No hidden charges",
+              "Cancel anytime • No hidden charges",
               style: KhilonjiyaUI.sub.copyWith(
                 fontSize: 12.2,
                 color: const Color(0xFF94A3B8),
@@ -466,97 +389,72 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     );
   }
 
-  // ------------------------------------------------------------
-  // ACTIVE CARD (PRO)
-  // ------------------------------------------------------------
-  Widget _activeCard() {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: KhilonjiyaUI.r16,
-        border: Border.all(color: KhilonjiyaUI.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
+  Widget _featuresSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          "What you get",
+          style: KhilonjiyaUI.hTitle.copyWith(
+            fontSize: 16,
+            fontWeight: FontWeight.w900,
           ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-            decoration: BoxDecoration(
-              color: Colors.green.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: Colors.green.withOpacity(0.20),
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.verified_rounded,
-                  size: 16,
-                  color: Colors.green,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  "SUBSCRIPTION ACTIVE",
-                  style: KhilonjiyaUI.sub.copyWith(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w900,
-                    color: Colors.green,
-                    letterSpacing: 0.4,
-                  ),
-                ),
-              ],
-            ),
+        ),
+        const SizedBox(height: 10),
+        _featureCard(
+          icon: Icons.bolt_rounded,
+          title: "Priority applications",
+          subtitle:
+              "Your profile is shown higher to employers for faster callbacks.",
+        ),
+        _featureCard(
+          icon: Icons.verified_rounded,
+          title: "Verified job access",
+          subtitle: "Get access to premium and verified employer listings.",
+        ),
+        _featureCard(
+          icon: Icons.support_agent_rounded,
+          title: "Job support assistance",
+          subtitle:
+              "Get help in finding suitable jobs based on your profile and skills.",
+        ),
+        _featureCard(
+          icon: Icons.lock_open_rounded,
+          title: "Unlock premium jobs",
+          subtitle: "Apply to exclusive jobs available only to Pro users.",
+        ),
+      ],
+    );
+  }
+
+  Widget _faqSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          "FAQs",
+          style: KhilonjiyaUI.hTitle.copyWith(
+            fontSize: 16,
+            fontWeight: FontWeight.w900,
           ),
-          const SizedBox(height: 14),
-          Text(
-            "You are a Pro user",
-            style: KhilonjiyaUI.hTitle.copyWith(
-              fontSize: 20,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            "Your premium subscription is active. Enjoy priority visibility and premium jobs.",
-            style: KhilonjiyaUI.sub.copyWith(
-              fontSize: 13.2,
-              height: 1.35,
-              color: const Color(0xFF64748B),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: OutlinedButton(
-              style: OutlinedButton.styleFrom(
-                side: BorderSide(color: KhilonjiyaUI.border),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              onPressed: _loadSubscriptionStatus,
-              child: const Text(
-                "Refresh Status",
-                style: TextStyle(
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 10),
+        _faqTile(
+          title: "Is this subscription refundable?",
+          answer:
+              "Currently subscriptions are non-refundable. You can renew anytime after expiry.",
+        ),
+        _faqTile(
+          title: "Will I definitely get a job?",
+          answer:
+              "No service can guarantee a job. Pro increases visibility and improves your chances.",
+        ),
+        _faqTile(
+          title: "Can I cancel anytime?",
+          answer:
+              "Yes. Since this is manual renewal, your plan will simply expire after 30 days.",
+        ),
+      ],
     );
   }
 
