@@ -56,14 +56,6 @@ class SubscriptionService {
   // RAZORPAY - CREATE ORDER
   // ============================================================
 
-  /// Returns:
-  /// {
-  ///   order_id: "order_xxx",
-  ///   amount: 99900,
-  ///   currency: "INR",
-  ///   plan_key: "pro_monthly",
-  ///   transaction_id: "uuid"
-  /// }
   Future<Map<String, dynamic>> createOrder({
     int amountRupees = 999,
     String planKey = "pro_monthly",
@@ -89,13 +81,9 @@ class SubscriptionService {
   }
 
   // ============================================================
-  // RAZORPAY - VERIFY PAYMENT
+  // ✅ VERIFY PAYMENT (OPTION B)
   // ============================================================
 
-  /// This will:
-  /// - verify signature in Edge Function
-  /// - mark payment success in DB
-  /// - activate subscription (30 days)
   Future<void> verifyPayment({
     required String transactionId,
     required String razorpayOrderId,
@@ -107,18 +95,13 @@ class SubscriptionService {
     final uid = _uid();
 
     final res = await _db.functions.invoke(
-      // ✅ Your actual function name
-      'verify-razorpay-payment',
+      'verify-razorpay-payment', // ✅ OPTION B
       body: {
-        // ✅ REQUIRED by your function
-        "user_id": uid,
-
-        // still send transaction_id (useful for tracking later)
         "transaction_id": transactionId,
-
         "razorpay_order_id": razorpayOrderId,
         "razorpay_payment_id": razorpayPaymentId,
         "razorpay_signature": razorpaySignature,
+        "user_id": uid, // ✅ REQUIRED by your edge function
       },
     );
 
@@ -130,7 +113,7 @@ class SubscriptionService {
 
     final ok = (data['success'] == true);
     if (!ok) {
-      throw Exception(data['message'] ?? "Payment verification failed");
+      throw Exception(data['error'] ?? "Payment verification failed");
     }
   }
 }
