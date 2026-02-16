@@ -13,10 +13,10 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
-    <!-- Camera (only if you use camera anywhere) -->
+    <!-- Camera -->
     <uses-permission android:name="android.permission.CAMERA" />
 
-    <!-- Android 12 and below (for file picker fallback) -->
+    <!-- Android 12 and below -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
@@ -26,7 +26,7 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
-    <!-- Android 13+ permissions (important for photo picker) -->
+    <!-- Android 13+ -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
 
     <!-- Other -->
@@ -35,7 +35,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
 
-    <!-- SMS permissions (only if you really use OTP auto read) -->
+    <!-- SMS permissions (only if you use OTP auto read) -->
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
@@ -59,10 +59,15 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
-        <!-- Disable impeller (as you already had) -->
+        <!-- Disable impeller -->
         <meta-data
             android:name="io.flutter.embedding.android.EnableImpeller"
             android:value="false" />
+
+        <!-- Razorpay uses this in some cases -->
+        <meta-data
+            android:name="com.razorpay.ApiKey"
+            android:value="rzp_test_xxxxxxxx" />
 
         <activity
             android:name=".MainActivity"
@@ -110,15 +115,22 @@
 
     </application>
 
-    <!-- Required for url_launcher -->
+    <!-- Required for url_launcher + Razorpay deep links -->
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
         </intent>
+
         <intent>
             <action android:name="android.intent.action.DIAL" />
             <data android:scheme="tel" />
+        </intent>
+
+        <!-- Razorpay / UPI apps -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="upi" />
         </intent>
     </queries>
 
