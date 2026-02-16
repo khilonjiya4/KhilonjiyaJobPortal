@@ -8,7 +8,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/ui/khilonjiya_ui.dart';
 import '../../routes/app_routes.dart';
 import '../../services/job_seeker_home_service.dart';
-import '../../services/subscription_service.dart';
 
 import '../common/widgets/pages/job_details_page.dart';
 
@@ -37,7 +36,15 @@ import 'widgets/home_sections/expected_salary_card.dart';
 import 'widgets/home_sections/section_header.dart';
 import 'widgets/home_sections/job_card_horizontal.dart';
 
+// ✅ NEW IMPORT
 import '../common/widgets/cards/company_card_horizontal.dart';
+
+// ✅ NEW IMPORTS (for drawer)
+import '../../services/subscription_service.dart';
+import 'subscription_page.dart';
+
+// ✅ NEW PAGE (created in File 4/4)
+import 'jobs_posted_today_page.dart';
 
 class HomeJobsFeed extends StatefulWidget {
   const HomeJobsFeed({Key? key}) : super(key: key);
@@ -48,8 +55,10 @@ class HomeJobsFeed extends StatefulWidget {
 
 class _HomeJobsFeedState extends State<HomeJobsFeed> {
   final JobSeekerHomeService _homeService = JobSeekerHomeService();
-  final SubscriptionService _subscriptionService = SubscriptionService();
   final SupabaseClient _supabase = Supabase.instance.client;
+
+  // ✅ subscription service (to show Pro / Upgrade in drawer)
+  final SubscriptionService _subscriptionService = SubscriptionService();
 
   bool _isCheckingAuth = true;
   bool _isDisposed = false;
@@ -64,7 +73,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   int _jobsPostedToday = 0;
 
   // ------------------------------------------------------------
-  // PRO
+  // PRO STATUS (for drawer UI)
   // ------------------------------------------------------------
   bool _isProActive = false;
 
@@ -161,18 +170,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
     });
   }
 
-  String _cleanProfileName(String raw) {
-    final n = raw.trim();
-    if (n.isEmpty) return "Your Profile";
-
-    final lower = n.toLowerCase();
-    final isFake = RegExp(r'^user[\+\d]+$').hasMatch(lower);
-
-    if (isFake) return "Your Profile";
-
-    return n;
-  }
-
   Future<void> _loadInitialData() async {
     if (_isDisposed) return;
 
@@ -185,10 +182,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
       final summary = await _homeService.getHomeProfileSummary();
       final jobsCount = await _homeService.getJobsPostedTodayCount();
 
-      _profileName = _cleanProfileName(
-        (summary['profileName'] ?? "Your Profile").toString(),
-      );
-
+      _profileName = (summary['profileName'] ?? "Your Profile").toString();
       _profileCompletion = (summary['profileCompletion'] ?? 0) as int;
       _lastUpdatedText =
           (summary['lastUpdatedText'] ?? "Updated recently").toString();
@@ -219,7 +213,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
         _unreadNotifications = 0;
       }
 
-      // 8) Pro status
+      // ✅ 8) Pro subscription check (for drawer)
       try {
         _isProActive = await _subscriptionService.isProActive();
       } catch (_) {
@@ -358,6 +352,38 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   }
 
   // ------------------------------------------------------------
+  // SUBSCRIPTION PAGE (DRAWER)
+  // ------------------------------------------------------------
+  Future<void> _openSubscriptionPage() async {
+    final _ = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const SubscriptionPage()),
+    );
+
+    // When returning, refresh Pro status (and drawer UI)
+    if (_isDisposed) return;
+
+    try {
+      final active = await _subscriptionService.isProActive();
+      if (!_isDisposed && mounted) {
+        setState(() => _isProActive = active);
+      }
+    } catch (_) {}
+  }
+
+  // ------------------------------------------------------------
+  // JOBS POSTED TODAY PAGE (RIGHT CARD VIEW ALL)
+  // ------------------------------------------------------------
+  void _openJobsPostedTodayPage() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const JobsPostedTodayPage(),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
   // EXPECTED SALARY FLOW
   // ------------------------------------------------------------
   Future<void> _openExpectedSalaryEditPage() async {
@@ -488,6 +514,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
           ),
           const SizedBox(width: 8),
 
+          // Notifications
           InkWell(
             onTap: () {},
             borderRadius: BorderRadius.circular(999),
@@ -565,9 +592,13 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
             lastUpdatedText: _lastUpdatedText,
             missingDetails: _missingDetails,
             jobsPostedToday: _jobsPostedToday,
+
+            // left card
             onProfileTap: _openProfileEditPage,
-            onMissingDetailsTap: _openProfileEditPage,
-            onViewAllTap: _openProfileEditPage,
+            onProfileViewAllTap: _openProfileEditPage,
+
+            // right card
+            onJobsTodayViewAllTap: _openJobsPostedTodayPage,
           ),
           const SizedBox(height: 14),
 
@@ -593,6 +624,9 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
           ),
           const SizedBox(height: 18),
 
+          // ============================================================
+          // RECOMMENDED
+          // ============================================================
           SectionHeader(
             title: "Recommended jobs",
             ctaText: "View all",
@@ -618,6 +652,9 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
           const SizedBox(height: 18),
 
+          // ============================================================
+          // LATEST
+          // ============================================================
           SectionHeader(
             title: "Latest jobs",
             ctaText: "View all",
@@ -643,6 +680,9 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
           const SizedBox(height: 18),
 
+          // ============================================================
+          // NEARBY
+          // ============================================================
           SectionHeader(
             title: "Jobs nearby",
             ctaText: "View all",
@@ -668,6 +708,9 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
           const SizedBox(height: 18),
 
+          // ============================================================
+          // TOP COMPANIES
+          // ============================================================
           SectionHeader(
             title: "Top companies",
             ctaText: "View all",
@@ -739,7 +782,8 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
       drawer: NaukriDrawer(
         userName: _profileName,
         profileCompletion: _profileCompletion,
-        isProActive: _isProActive,
+        isProActive: _isProActive, // ✅ NEW
+        onUpgradeTap: _openSubscriptionPage, // ✅ NEW
         onClose: () => Navigator.pop(context),
       ),
       body: SafeArea(
