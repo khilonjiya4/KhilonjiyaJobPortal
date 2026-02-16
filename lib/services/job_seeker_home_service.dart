@@ -59,6 +59,138 @@ class JobSeekerHomeService {
   ''';
 
   // ============================================================
+  // ✅ SUBSCRIPTION (PRO)
+  // ============================================================
+
+  /// Returns the subscription row for the current user.
+  ///
+  /// Table: subscriptions
+  /// status: inactive | active | expired
+  Future<Map<String, dynamic>?> getMySubscription() async {
+    _ensureAuthenticatedSync();
+    final userId = _userId();
+
+    final res = await _db
+        .from('subscriptions')
+        .select('id, user_id, status, plan_price, starts_at, expires_at')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+    if (res == null) return null;
+    return Map<String, dynamic>.from(res);
+  }
+
+  /// True if subscription is active AND not expired.
+  Future<bool> isProActive() async {
+    final sub = await getMySubscription();
+    if (sub == null) return false;
+
+    final status = (sub['status'] ?? 'inactive').toString();
+
+    if (status != 'active') return false;
+
+    final expiresAtRaw = sub['expires_at']?.toString();
+    if (expiresAtRaw == null || expiresAtRaw.trim().isEmpty) return false;
+
+    final expiresAt = DateTime.tryParse(expiresAtRaw);
+    if (expiresAt == null) return false;
+
+    return expiresAt.isAfter(DateTime.now());
+  }
+
+  /// Calls Edge Function: create_razorpay_order
+  ///
+  /// Returns:
+  /// {
+  ///   "order_id": "...",
+  ///   "amount": 99900,
+  ///   "currency": "INR",
+  ///   "key_id": "rzp_live_xxx"
+  /// }
+  Future<Map<String, dynamic>> createProOrder({
+    int amountRupees = 999,
+    String planKey = 'pro_monthly',
+  }) async {
+    _ensureAuthenticatedSync();
+
+    final userId = _userId();
+
+    final payload = {
+      'user_id': userId,
+      'amount_rupees': amountRupees,
+      'plan_key': planKey,
+    };
+
+    final res =
+        await _db.functions.invoke('create_razorpay_order', body: payload);
+
+    if (res.status != 200) {
+      throw Exception(
+        'create_razorpay_order failed: ${res.status} ${res.data}',
+      );
+    }
+
+    final data = res.data;
+    if (data == null || data is! Map) {
+      throw Exception('Invalid create_razorpay_order response');
+    }
+
+    return Map<String, dynamic>.from(data);
+  }
+
+  /// Calls Edge Function: verify_razorpay_payment
+  ///
+  /// Must send:
+  /// - razorpay_order_id
+  /// - razorpay_payment_id
+  /// - razorpay_signature
+  ///
+  /// Edge Function will:
+  /// - Verify signature using RAZORPAY_KEY_SECRET
+  /// - Mark payment paid in DB
+  /// - Activate subscription in subscriptions table (30 days)
+  Future<bool> verifyProPayment({
+    required String razorpayOrderId,
+    required String razorpayPaymentId,
+    required String razorpaySignature,
+    int amountRupees = 999,
+    String planKey = 'pro_monthly',
+  }) async {
+    _ensureAuthenticatedSync();
+
+    final userId = _userId();
+
+    final payload = {
+      'user_id': userId,
+      'razorpay_order_id': razorpayOrderId,
+      'razorpay_payment_id': razorpayPaymentId,
+      'razorpay_signature': razorpaySignature,
+      'amount_rupees': amountRupees,
+      'plan_key': planKey,
+    };
+
+    final res =
+        await _db.functions.invoke('verify_razorpay_payment', body: payload);
+
+    if (res.status != 200) {
+      throw Exception(
+        'verify_razorpay_payment failed: ${res.status} ${res.data}',
+      );
+    }
+
+    final data = res.data;
+    if (data == null || data is! Map) return false;
+
+    final ok = (data['success'] ?? false) == true;
+    return ok;
+  }
+
+  /// After payment, call this to re-check subscription row.
+  Future<bool> refreshProStatus() async {
+    return isProActive();
+  }
+
+  // ============================================================
   // JOB FEED (BASE)
   // ============================================================
 
