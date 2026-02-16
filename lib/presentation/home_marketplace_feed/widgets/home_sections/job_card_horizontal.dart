@@ -5,17 +5,14 @@ import '../../../../core/ui/khilonjiya_ui.dart';
 
 class JobCardHorizontal extends StatelessWidget {
   final Map<String, dynamic> job;
-  final bool isSaved;
-  final VoidCallback onSaveToggle;
+
+  // NOTE:
+  // Horizontal card: NO save icon (as per final requirement)
   final VoidCallback onTap;
 
-  /// Option A (passed from parent or extracted here)
-  /// We will extract from job['companies']['business_types_master']
   const JobCardHorizontal({
     Key? key,
     required this.job,
-    required this.isSaved,
-    required this.onSaveToggle,
     required this.onTap,
   }) : super(key: key);
 
@@ -25,6 +22,9 @@ class JobCardHorizontal extends StatelessWidget {
 
   // Logo should be 30% of card height
   static const double _logoSize = cardHeight * 0.30; // = 51
+
+  // Fixed right column width so logo stays centered on the right side
+  static const double _rightColumnWidth = 70;
 
   @override
   Widget build(BuildContext context) {
@@ -96,11 +96,10 @@ class JobCardHorizontal extends StatelessWidget {
       }
     }
 
+    if (businessType.trim().isEmpty) businessType = "Business";
+
     // ------------------------------------------------------------
-    // UI (Same to same as vertical but compressed)
-    // - Only: Job, Company, Location, Salary, Posted ago, Logo
-    // - No tags
-    // - Fixed width & height
+    // UI
     // ------------------------------------------------------------
     return InkWell(
       onTap: onTap,
@@ -121,108 +120,64 @@ class JobCardHorizontal extends StatelessWidget {
             ),
           ],
         ),
-        child: Column(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ============================================================
-            // TOP: TITLE + COMPANY + RIGHT LOGO + SAVE
+            // LEFT CONTENT
             // ============================================================
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // LEFT CONTENT
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // JOB TITLE (HIGHEST)
-                      Text(
-                        title.isEmpty ? "Job" : title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: KhilonjiyaUI.cardTitle.copyWith(
-                          fontSize: 15.4,
-                          fontWeight: FontWeight.w900,
-                          height: 1.10,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-
-                      // COMPANY (MEDIUM)
-                      Text(
-                        company.isEmpty ? "Company" : company,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: KhilonjiyaUI.body.copyWith(
-                          fontSize: 13.1,
-                          fontWeight: FontWeight.w900,
-                          color: const Color(0xFF334155),
-                          height: 1.10,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(width: 10),
-
-                // RIGHT LOGO (CENTERED)
-                _BusinessTypeIcon(
-                  businessType: businessType,
-                  iconUrl: businessIconUrl,
-                  size: _logoSize, // 30% of card height
-                ),
-
-                const SizedBox(width: 6),
-
-                // SAVE ICON
-                InkWell(
-                  onTap: onSaveToggle,
-                  borderRadius: BorderRadius.circular(999),
-                  child: Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: Icon(
-                      isSaved ? Icons.bookmark_rounded : Icons.bookmark_outline,
-                      size: 24,
-                      color: isSaved
-                          ? KhilonjiyaUI.primary
-                          : const Color(0xFF64748B),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // JOB TITLE (HIGHEST)
+                  Text(
+                    title.isEmpty ? "Job" : title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: KhilonjiyaUI.cardTitle.copyWith(
+                      fontSize: 15.4,
+                      fontWeight: FontWeight.w900,
+                      height: 1.10,
                     ),
                   ),
-                ),
-              ],
-            ),
+                  const SizedBox(height: 6),
 
-            const SizedBox(height: 12),
+                  // COMPANY (MEDIUM)
+                  Text(
+                    company.isEmpty ? "Company" : company,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: KhilonjiyaUI.body.copyWith(
+                      fontSize: 13.1,
+                      fontWeight: FontWeight.w900,
+                      color: const Color(0xFF334155),
+                      height: 1.10,
+                    ),
+                  ),
 
-            // ============================================================
-            // LOCATION
-            // ============================================================
-            _plainRow(
-              icon: Icons.location_on_rounded,
-              iconColor: const Color(0xFF2563EB),
-              text: location,
-            ),
+                  const SizedBox(height: 12),
 
-            const SizedBox(height: 8),
+                  // LOCATION
+                  _plainRow(
+                    icon: Icons.location_on_rounded,
+                    iconColor: const Color(0xFF2563EB),
+                    text: location,
+                  ),
 
-            // ============================================================
-            // SALARY
-            // ============================================================
-            _plainRow(
-              icon: Icons.currency_rupee_rounded,
-              iconColor: const Color(0xFF16A34A),
-              text: salaryText,
-            ),
+                  const SizedBox(height: 8),
 
-            const Spacer(),
+                  // SALARY
+                  _plainRow(
+                    icon: Icons.currency_rupee_rounded,
+                    iconColor: const Color(0xFF16A34A),
+                    text: salaryText,
+                  ),
 
-            // ============================================================
-            // FOOTER: POSTED AGO (ALWAYS LAST LINE)
-            // ============================================================
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
+                  const Spacer(),
+
+                  // POSTED AGO (ALWAYS LAST LINE)
+                  Text(
                     _postedAgo(postedAt),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -232,14 +187,25 @@ class JobCardHorizontal extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
+                ],
+              ),
+            ),
+
+            const SizedBox(width: 12),
+
+            // ============================================================
+            // RIGHT SIDE (LOGO CENTERED)
+            // ============================================================
+            SizedBox(
+              width: _rightColumnWidth,
+              height: cardHeight - 32, // padding top+bottom = 32
+              child: Center(
+                child: _BusinessTypeIcon(
+                  businessType: businessType,
+                  iconUrl: businessIconUrl,
+                  size: _logoSize,
                 ),
-                const SizedBox(width: 10),
-                const Icon(
-                  Icons.arrow_forward,
-                  size: 18,
-                  color: KhilonjiyaUI.muted,
-                ),
-              ],
+              ),
             ),
           ],
         ),
