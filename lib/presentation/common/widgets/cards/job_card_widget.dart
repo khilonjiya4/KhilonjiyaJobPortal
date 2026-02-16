@@ -19,8 +19,8 @@ class JobCardWidget extends StatelessWidget {
 
   static const double _logoSize = 52;
 
-  // right overlay space so text never touches logo/bookmark
-  static const double _rightSafePadding = 78;
+  // right side fixed column width (same concept as horizontal)
+  static const double _rightColumnWidth = 72;
 
   @override
   Widget build(BuildContext context) {
@@ -31,6 +31,7 @@ class JobCardWidget extends StatelessWidget {
 
     // joined companies
     final companyMap = job['companies'];
+
     final companyName = (companyMap is Map<String, dynamic>)
         ? (companyMap['name'] ?? '').toString().trim()
         : '';
@@ -69,29 +70,43 @@ class JobCardWidget extends StatelessWidget {
     // BUSINESS TYPE (Option A)
     // companies.business_types_master.type_name + logo_url
     // ------------------------------------------------------------
-    String businessType = '';
+    String businessType = "Business";
     String? businessIconUrl;
 
     if (companyMap is Map<String, dynamic>) {
+      // 1) Preferred: business_types_master join
       final bt = companyMap['business_types_master'];
-
       if (bt is Map<String, dynamic>) {
-        businessType = (bt['type_name'] ?? '').toString().trim();
+        final name = (bt['type_name'] ?? '').toString().trim();
+        if (name.isNotEmpty) businessType = name;
 
         final url = (bt['logo_url'] ?? '').toString().trim();
         businessIconUrl = url.isEmpty ? null : url;
       }
 
-      if (businessType.isEmpty) {
-        businessType = (companyMap['business_type'] ?? '').toString().trim();
+      // 2) fallback name
+      if (businessType.trim().isEmpty) {
+        final fallback =
+            (companyMap['industry'] ?? companyMap['business_type'] ?? '')
+                .toString()
+                .trim();
+        if (fallback.isNotEmpty) businessType = fallback;
       }
+
+      // 3) fallback logo from companies table
       if (businessIconUrl == null) {
-        final url = (companyMap['business_icon_url'] ?? '').toString().trim();
-        businessIconUrl = url.isEmpty ? null : url;
+        final url1 = (companyMap['logo_url'] ?? '').toString().trim();
+        if (url1.isNotEmpty) businessIconUrl = url1;
+      }
+
+      // 4) fallback logo custom
+      if (businessIconUrl == null) {
+        final url2 = (companyMap['business_icon_url'] ?? '').toString().trim();
+        if (url2.isNotEmpty) businessIconUrl = url2;
       }
     }
 
-    if (businessType.isEmpty) businessType = "Business";
+    if (businessType.trim().isEmpty) businessType = "Business";
 
     // ------------------------------------------------------------
     // UI
@@ -118,15 +133,13 @@ class JobCardWidget extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ============================================================
-            // HEADER (STACK FIX)
-            // - Left side uses full width
-            // - Right side is overlayed (no reserved gap)
+            // HEADER (FIXED LAYOUT LIKE HORIZONTAL)
             // ============================================================
-            Stack(
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // LEFT TEXT BLOCK (FULL WIDTH)
-                Padding(
-                  padding: const EdgeInsets.only(right: _rightSafePadding),
+                // LEFT CONTENT
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -156,14 +169,14 @@ class JobCardWidget extends StatelessWidget {
                   ),
                 ),
 
-                // RIGHT SIDE (OVERLAYED)
-                Positioned(
-                  right: 0,
-                  top: 0,
+                const SizedBox(width: 12),
+
+                // RIGHT SIDE (BOOKMARK TOP + LOGO BELOW)
+                SizedBox(
+                  width: _rightColumnWidth,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      // SAVE
                       InkWell(
                         onTap: onSaveToggle,
                         borderRadius: BorderRadius.circular(999),
@@ -180,13 +193,15 @@ class JobCardWidget extends StatelessWidget {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 10),
 
-                      // LOGO
-                      _BusinessTypeIcon(
-                        businessType: businessType,
-                        iconUrl: businessIconUrl,
-                        size: _logoSize,
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: _BusinessTypeIcon(
+                          businessType: businessType,
+                          iconUrl: businessIconUrl,
+                          size: _logoSize,
+                        ),
                       ),
                     ],
                   ),
