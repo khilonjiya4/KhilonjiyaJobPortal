@@ -104,10 +104,18 @@ class SubscriptionService {
   }) async {
     _ensureAuth();
 
+    final uid = _uid();
+
     final res = await _db.functions.invoke(
-      'razorpay_verify_payment',
+      // ✅ Your actual function name
+      'verify-razorpay-payment',
       body: {
+        // ✅ REQUIRED by your function
+        "user_id": uid,
+
+        // still send transaction_id (useful for tracking later)
         "transaction_id": transactionId,
+
         "razorpay_order_id": razorpayOrderId,
         "razorpay_payment_id": razorpayPaymentId,
         "razorpay_signature": razorpaySignature,
