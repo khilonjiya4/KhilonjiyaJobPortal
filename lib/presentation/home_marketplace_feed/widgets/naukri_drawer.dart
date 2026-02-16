@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/ui/khilonjiya_ui.dart';
 import '../../../routes/app_routes.dart';
 import '../../../services/mobile_auth_service.dart';
-import '../../../services/subscription_service.dart';
 
 // Existing pages (your folder)
 import '../job_search_page.dart';
@@ -14,62 +12,28 @@ import '../saved_jobs_page.dart';
 import '../profile_performance_page.dart';
 import '../profile_edit_page.dart';
 
-// Subscription Page (same folder)
+// Subscription page
 import '../subscription_page.dart';
 
 // ✅ NEW PAGES
 import '../settings_page.dart';
 import '../help_page.dart';
 
-class NaukriDrawer extends StatefulWidget {
+class NaukriDrawer extends StatelessWidget {
   final String userName;
   final int profileCompletion;
   final VoidCallback onClose;
+
+  // ✅ NEW
+  final bool isProActive;
 
   const NaukriDrawer({
     Key? key,
     required this.userName,
     required this.profileCompletion,
     required this.onClose,
+    required this.isProActive,
   }) : super(key: key);
-
-  @override
-  State<NaukriDrawer> createState() => _NaukriDrawerState();
-}
-
-class _NaukriDrawerState extends State<NaukriDrawer> {
-  final SubscriptionService _subscriptionService = SubscriptionService();
-
-  bool _checkingPro = true;
-  bool _isProActive = false;
-
-  // Dummy Playstore link for now (replace later)
-  static const String kPlayStoreUrl = "https://play.google.com/store";
-
-  @override
-  void initState() {
-    super.initState();
-    _loadProStatus();
-  }
-
-  Future<void> _loadProStatus() async {
-    try {
-      final active = await _subscriptionService.isProActive();
-      if (!mounted) return;
-
-      setState(() {
-        _isProActive = active;
-        _checkingPro = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-
-      setState(() {
-        _isProActive = false;
-        _checkingPro = false;
-      });
-    }
-  }
 
   // ------------------------------------------------------------
   // NAV HELPERS
@@ -103,7 +67,7 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
     _openPage(context, const ProfileEditPage());
   }
 
-  void _openUpgrade(BuildContext context) {
+  void _openSubscription(BuildContext context) {
     _openPage(context, const SubscriptionPage());
   }
 
@@ -135,42 +99,47 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
   }
 
   // ------------------------------------------------------------
-  // NAME RULE
+  // NAME RULE (FAKE NAME => Your Profile)
   // ------------------------------------------------------------
-  String _displayProfileTitle(String rawName) {
-    final name = rawName.trim();
-    if (name.isEmpty) return "Your Profile";
+  String _displayName(String raw) {
+    final n = raw.trim();
 
-    // If it looks like: user919876543210 OR user_919876...
-    final lower = name.toLowerCase();
+    if (n.isEmpty) return "Your Profile";
 
-    // common patterns from phone based defaults
-    final looksLikeDefaultUser = lower.startsWith("user") &&
-        RegExp(r'\d{6,}').hasMatch(lower); // contains long digits
+    // fake name pattern: user<mobile>
+    // examples:
+    // user9876543210
+    // user+919876543210
+    final lower = n.toLowerCase();
+    final isFake = RegExp(r'^user[\+\d]+$').hasMatch(lower);
 
-    if (looksLikeDefaultUser) return "Your Profile";
+    if (isFake) return "Your Profile";
 
-    // if user wrote "User" only
-    if (lower == "user") return "Your Profile";
-
-    // If it's real name
-    return "$name's Profile";
+    return n;
   }
 
   // ------------------------------------------------------------
-  // PLAYSTORE OPEN
+  // PLAYSTORE (DUMMY)
   // ------------------------------------------------------------
-  Future<void> _openPlayStore() async {
-    final uri = Uri.parse(kPlayStoreUrl);
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  Future<void> _openPlaystore() async {
+    // ✅ replace later with your real link
+    const dummy =
+        "https://play.google.com/store/apps/details?id=com.example.khilonjiya";
+
+    final uri = Uri.parse(dummy);
+
+    await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final p = widget.profileCompletion.clamp(0, 100);
+    final p = profileCompletion.clamp(0, 100);
     final value = p / 100;
 
-    final headerTitle = _displayProfileTitle(widget.userName);
+    final displayName = _displayName(userName);
 
     return Drawer(
       backgroundColor: Colors.white,
@@ -229,7 +198,7 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  headerTitle,
+                                  displayName,
                                   style: KhilonjiyaUI.hTitle.copyWith(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w900,
@@ -249,7 +218,7 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
                       ),
 
                       IconButton(
-                        onPressed: widget.onClose,
+                        onPressed: onClose,
                         icon: const Icon(Icons.close),
                       ),
                     ],
@@ -257,30 +226,24 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
                   const SizedBox(height: 14),
 
                   // ------------------------------------------------------------
-                  // UPGRADE / PRO CARD
+                  // PRO CARD
                   // ------------------------------------------------------------
                   InkWell(
-                    onTap: _checkingPro ? null : () => _openUpgrade(context),
+                    onTap: () => _openSubscription(context),
                     borderRadius: KhilonjiyaUI.r16,
                     child: Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          colors: _isProActive
-                              ? const [
-                                  Color(0xFFECFDF5),
-                                  Color(0xFFF0FDF4),
-                                ]
-                              : const [
-                                  Color(0xFFEFF6FF),
-                                  Color(0xFFF5F3FF),
-                                ],
+                          colors: isProActive
+                              ? const [Color(0xFFECFDF5), Color(0xFFF0FDF4)]
+                              : const [Color(0xFFEFF6FF), Color(0xFFF5F3FF)],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
                         borderRadius: KhilonjiyaUI.r16,
                         border: Border.all(
-                          color: _isProActive
+                          color: isProActive
                               ? const Color(0xFFBBF7D0)
                               : const Color(0xFFDBEAFE),
                         ),
@@ -296,10 +259,10 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
                               border: Border.all(color: KhilonjiyaUI.border),
                             ),
                             child: Icon(
-                              _isProActive
+                              isProActive
                                   ? Icons.verified_rounded
                                   : Icons.workspace_premium_outlined,
-                              color: _isProActive
+                              color: isProActive
                                   ? const Color(0xFF16A34A)
                                   : KhilonjiyaUI.primary,
                             ),
@@ -310,7 +273,7 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  _isProActive
+                                  isProActive
                                       ? "Khilonjiya Pro"
                                       : "Upgrade to Khilonjiya Pro",
                                   style: KhilonjiyaUI.body.copyWith(
@@ -319,9 +282,9 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
                                 ),
                                 const SizedBox(height: 3),
                                 Text(
-                                  _isProActive
-                                      ? "Subscription active"
-                                      : "Unlock premium job features",
+                                  isProActive
+                                      ? "Active subscription"
+                                      : "Get more visibility & premium jobs",
                                   style: KhilonjiyaUI.sub.copyWith(
                                     fontSize: 12.2,
                                     color: const Color(0xFF64748B),
@@ -412,9 +375,6 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
 
                   const SizedBox(height: 8),
 
-                  // ------------------------------------------------------------
-                  // LOGOUT (BOTTOM)
-                  // ------------------------------------------------------------
                   _menuItem(
                     context,
                     icon: Icons.logout_rounded,
@@ -431,7 +391,7 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
             ),
 
             // ------------------------------------------------------------
-            // FEEDBACK STRIP
+            // FEEDBACK STRIP (UPDATED)
             // ------------------------------------------------------------
             Container(
               padding: const EdgeInsets.all(16),
@@ -450,7 +410,7 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
                     ),
                   ),
                   InkWell(
-                    onTap: _openPlayStore,
+                    onTap: _openPlaystore,
                     borderRadius: BorderRadius.circular(14),
                     child: Container(
                       width: 42,
