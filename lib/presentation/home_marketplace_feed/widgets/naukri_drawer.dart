@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/ui/khilonjiya_ui.dart';
 import '../../../routes/app_routes.dart';
 import '../../../services/mobile_auth_service.dart';
+import '../../../services/subscription_service.dart';
 
 // Existing pages (your folder)
 import '../job_search_page.dart';
@@ -12,28 +14,90 @@ import '../saved_jobs_page.dart';
 import '../profile_performance_page.dart';
 import '../profile_edit_page.dart';
 
+// Subscription page (same folder as HomeJobsFeed)
+import '../subscription_page.dart';
+
 // ✅ NEW PAGES
 import '../settings_page.dart';
 import '../help_page.dart';
 
-class NaukriDrawer extends StatelessWidget {
+class NaukriDrawer extends StatefulWidget {
   final String userName;
   final int profileCompletion;
-
-  // ✅ NEW
-  final bool isProActive;
-  final VoidCallback onUpgradeTap;
-
   final VoidCallback onClose;
 
   const NaukriDrawer({
     Key? key,
     required this.userName,
     required this.profileCompletion,
-    required this.isProActive,
-    required this.onUpgradeTap,
     required this.onClose,
   }) : super(key: key);
+
+  @override
+  State<NaukriDrawer> createState() => _NaukriDrawerState();
+}
+
+class _NaukriDrawerState extends State<NaukriDrawer> {
+  final SubscriptionService _subscriptionService = SubscriptionService();
+
+  bool _loadingPro = true;
+  bool _isProActive = false;
+
+  // Temporary dummy link (you will replace later)
+  static const String _playStoreUrl =
+      "https://play.google.com/store/apps/details?id=com.example.khilonjiya";
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProStatus();
+  }
+
+  Future<void> _loadProStatus() async {
+    try {
+      final active = await _subscriptionService.isProActive();
+      if (!mounted) return;
+
+      setState(() {
+        _isProActive = active;
+        _loadingPro = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _isProActive = false;
+        _loadingPro = false;
+      });
+    }
+  }
+
+  // ------------------------------------------------------------
+  // NAME LOGIC (FAKE user<mobile> => Your Profile)
+  // ------------------------------------------------------------
+  bool _isFakeUserName(String name) {
+    final n = name.trim().toLowerCase();
+
+    if (n.isEmpty) return true;
+
+    // Supabase default: user<mobile>
+    if (n.startsWith("user")) return true;
+
+    if (RegExp(r'^\d+$').hasMatch(n)) return true;
+
+    return false;
+  }
+
+  String _displayName(String rawName) {
+    final name = rawName.trim();
+
+    if (_isFakeUserName(name)) return "Your Profile";
+
+    final firstName = name.split(" ").first.trim();
+    if (firstName.isEmpty) return "Your Profile";
+
+    return "$firstName's Profile";
+  }
 
   // ------------------------------------------------------------
   // NAV HELPERS
@@ -67,9 +131,12 @@ class NaukriDrawer extends StatelessWidget {
     _openPage(context, const ProfileEditPage());
   }
 
-  void _openUpgrade(BuildContext context) {
-    _closeDrawer(context);
-    onUpgradeTap();
+  void _openSubscription(BuildContext context) async {
+    _openPage(context, const SubscriptionPage());
+
+    // Optional: refresh pro status when user comes back
+    await Future.delayed(const Duration(milliseconds: 300));
+    if (mounted) _loadProStatus();
   }
 
   // ------------------------------------------------------------
@@ -100,49 +167,24 @@ class NaukriDrawer extends StatelessWidget {
   }
 
   // ------------------------------------------------------------
-  // PLAY STORE (TEMP DUMMY LINK)
+  // PLAYSTORE LIKE
   // ------------------------------------------------------------
-  Future<void> _openPlayStoreRating() async {
-    // TEMP dummy link (replace later with your real Play Store URL)
-    const url = "https://play.google.com/store/apps/details?id=com.khilonjiya.app";
+  Future<void> _openPlayStore() async {
+    final uri = Uri.parse(_playStoreUrl);
 
-    final uri = Uri.parse(url);
-
-    if (!await canLaunchUrl(uri)) return;
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
-
-  // ------------------------------------------------------------
-  // NAME DISPLAY LOGIC
-  // - If Supabase default name is like "user<mobile>"
-  // - Always show "Your Profile"
-  // - Else show "Pankaj's Profile"
-  // ------------------------------------------------------------
-  String _displayName() {
-    final raw = userName.trim();
-
-    if (raw.isEmpty) return "Your Profile";
-
-    final lower = raw.toLowerCase();
-
-    // Example fake names:
-    // user9876543210
-    // user_9876543210
-    // user-9876543210
-    if (lower.startsWith("user")) {
-      // if it contains any digit -> treat as fake default name
-      final hasDigits = RegExp(r'\d').hasMatch(lower);
-      if (hasDigits) return "Your Profile";
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      // ignore
     }
-
-    // Real name
-    return "$raw's Profile";
   }
 
   @override
   Widget build(BuildContext context) {
-    final p = profileCompletion.clamp(0, 100);
+    final p = widget.profileCompletion.clamp(0, 100);
     final value = p / 100;
+
+    final headerName = _displayName(widget.userName);
 
     return Drawer(
       backgroundColor: Colors.white,
@@ -201,9 +243,7 @@ class NaukriDrawer extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  _displayName(),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                                  headerName,
                                   style: KhilonjiyaUI.hTitle.copyWith(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w900,
@@ -223,7 +263,7 @@ class NaukriDrawer extends StatelessWidget {
                       ),
 
                       IconButton(
-                        onPressed: onClose,
+                        onPressed: widget.onClose,
                         icon: const Icon(Icons.close),
                       ),
                     ],
@@ -231,82 +271,105 @@ class NaukriDrawer extends StatelessWidget {
                   const SizedBox(height: 14),
 
                   // ------------------------------------------------------------
-                  // UPGRADE / PRO CARD
+                  // PRO CARD (UPGRADE or ACTIVE)
                   // ------------------------------------------------------------
-                  InkWell(
-                    onTap: () => _openUpgrade(context),
-                    borderRadius: KhilonjiyaUI.r16,
-                    child: Container(
-                      padding: const EdgeInsets.all(14),
+                  if (_loadingPro)
+                    Container(
+                      height: 64,
                       decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: isProActive
-                              ? const [Color(0xFFECFDF5), Color(0xFFF0FDF4)]
-                              : const [Color(0xFFEFF6FF), Color(0xFFF5F3FF)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
+                        color: const Color(0xFFF8FAFC),
                         borderRadius: KhilonjiyaUI.r16,
-                        border: Border.all(
-                          color: isProActive
-                              ? const Color(0xFFBBF7D0)
-                              : const Color(0xFFDBEAFE),
+                        border: Border.all(color: KhilonjiyaUI.border),
+                      ),
+                      child: const Center(
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2.4),
                         ),
                       ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: KhilonjiyaUI.border),
-                            ),
-                            child: Icon(
-                              isProActive
-                                  ? Icons.verified_rounded
-                                  : Icons.workspace_premium_outlined,
-                              color: isProActive
-                                  ? const Color(0xFF16A34A)
-                                  : KhilonjiyaUI.primary,
-                            ),
+                    )
+                  else
+                    InkWell(
+                      onTap: () => _openSubscription(context),
+                      borderRadius: KhilonjiyaUI.r16,
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: _isProActive
+                                ? const [
+                                    Color(0xFFECFDF5),
+                                    Color(0xFFF0FDF4),
+                                  ]
+                                : const [
+                                    Color(0xFFEFF6FF),
+                                    Color(0xFFF5F3FF),
+                                  ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  isProActive
-                                      ? "Khilonjiya Pro"
-                                      : "Upgrade to Khilonjiya Pro",
-                                  style: KhilonjiyaUI.body.copyWith(
-                                    fontWeight: FontWeight.w900,
+                          borderRadius: KhilonjiyaUI.r16,
+                          border: Border.all(
+                            color: _isProActive
+                                ? const Color(0xFFBBF7D0)
+                                : const Color(0xFFDBEAFE),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: KhilonjiyaUI.border),
+                              ),
+                              child: Icon(
+                                _isProActive
+                                    ? Icons.verified_rounded
+                                    : Icons.workspace_premium_outlined,
+                                color: _isProActive
+                                    ? const Color(0xFF16A34A)
+                                    : KhilonjiyaUI.primary,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _isProActive
+                                        ? "Khilonjiya Pro"
+                                        : "Upgrade to Khilonjiya Pro",
+                                    style: KhilonjiyaUI.body.copyWith(
+                                      fontWeight: FontWeight.w900,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  isProActive
-                                      ? "Subscription active"
-                                      : "Unlock premium job features",
-                                  style: KhilonjiyaUI.sub.copyWith(
-                                    fontSize: 12.4,
-                                    fontWeight: FontWeight.w700,
-                                    color: const Color(0xFF64748B),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _isProActive
+                                        ? "Subscription Active"
+                                        : "Unlock premium jobs",
+                                    style: KhilonjiyaUI.sub.copyWith(
+                                      fontSize: 12.2,
+                                      fontWeight: FontWeight.w700,
+                                      color: const Color(0xFF64748B),
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                          const Icon(
-                            Icons.chevron_right,
-                            color: KhilonjiyaUI.muted,
-                          ),
-                        ],
+                            const Icon(
+                              Icons.chevron_right,
+                              color: KhilonjiyaUI.muted,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -399,7 +462,7 @@ class NaukriDrawer extends StatelessWidget {
             ),
 
             // ------------------------------------------------------------
-            // FEEDBACK STRIP (ONLY THUMBS UP)
+            // FEEDBACK STRIP (ONLY LIKE)
             // ------------------------------------------------------------
             Container(
               padding: const EdgeInsets.all(16),
@@ -418,7 +481,7 @@ class NaukriDrawer extends StatelessWidget {
                     ),
                   ),
                   InkWell(
-                    onTap: _openPlayStoreRating,
+                    onTap: _openPlayStore,
                     borderRadius: BorderRadius.circular(14),
                     child: Container(
                       width: 42,
