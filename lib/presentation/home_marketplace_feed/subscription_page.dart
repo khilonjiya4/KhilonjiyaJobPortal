@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/ui/khilonjiya_ui.dart';
 import '../../services/subscription_service.dart';
@@ -25,21 +26,57 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
   bool _isActive = false;
 
+  // Prefill
+  String _prefillEmail = "";
+  String _prefillPhone = "";
+
   // Needed for verification after Razorpay returns
   String? _transactionId;
-  String? _razorpayOrderId;
 
   @override
   void initState() {
     super.initState();
     _initRazorpay();
-    _loadSubscription();
+    _bootstrap();
   }
 
   @override
   void dispose() {
     _razorpay?.clear();
+    _razorpay = null;
     super.dispose();
+  }
+
+  // ============================================================
+  // BOOTSTRAP
+  // ============================================================
+  Future<void> _bootstrap() async {
+    await _loadPrefill();
+    await _loadSubscription();
+  }
+
+  Future<void> _loadPrefill() async {
+    try {
+      final db = Supabase.instance.client;
+      final user = db.auth.currentUser;
+
+      if (user == null) return;
+
+      _prefillEmail = (user.email ?? "").trim();
+
+      // try from user_profiles
+      final profile = await db
+          .from('user_profiles')
+          .select('mobile_number')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (profile != null) {
+        _prefillPhone = (profile['mobile_number'] ?? "").toString().trim();
+      }
+    } catch (_) {
+      // ignore
+    }
   }
 
   // ============================================================
@@ -57,9 +94,9 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   // LOAD SUBSCRIPTION STATUS
   // ============================================================
   Future<void> _loadSubscription() async {
-    setState(() {
-      _loading = true;
-    });
+    if (!mounted) return;
+
+    setState(() => _loading = true);
 
     try {
       final active = await _subscriptionService.isProActive();
@@ -88,6 +125,9 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     setState(() => _paying = true);
 
     try {
+      // Reset old transaction id (important for retries)
+      _transactionId = null;
+
       // 1) Create order from Supabase function
       final order = await _subscriptionService.createOrder(
         amountRupees: SubscriptionPage.price,
@@ -95,9 +135,9 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       );
 
       _transactionId = order['transaction_id']?.toString();
-      _razorpayOrderId = order['order_id']?.toString();
+      final razorpayOrderId = order['order_id']?.toString();
 
-      if (_transactionId == null || _razorpayOrderId == null) {
+      if (_transactionId == null || razorpayOrderId == null) {
         throw Exception("Order creation returned invalid response");
       }
 
@@ -105,20 +145,17 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       //
       // IMPORTANT:
       // - key is your Razorpay Key ID (NOT secret)
-      // - for now keep dummy key, later you will replace
+      // - for now keep dummy key, later replace with real key
       final options = {
         "key": "rzp_test_REPLACE_LATER",
         "amount": order['amount'], // in paise (99900)
         "currency": "INR",
         "name": "Khilonjiya Pro",
-        "description": "Monthly subscription",
-        "order_id": _razorpayOrderId,
+        "description": "Monthly subscription (30 days)",
+        "order_id": razorpayOrderId,
         "prefill": {
-          "contact": "",
-          "email": "",
-        },
-        "theme": {
-          "color": "#0EA5E9",
+          "contact": _prefillPhone,
+          "email": _prefillEmail,
         },
         "method": {
           "upi": true,
@@ -226,6 +263,12 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
           style: TextStyle(fontWeight: FontWeight.w900),
         ),
         centerTitle: false,
+        actions: [
+          IconButton(
+            onPressed: _loading ? null : _loadSubscription,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -243,6 +286,8 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   }
 
   Widget _heroCard() {
+    final buttonText = _isActive ? "Renew Now" : "Subscribe Now";
+
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -324,7 +369,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Text(
-                  "/ month",
+                  "/ 30 days",
                   style: KhilonjiyaUI.sub.copyWith(
                     fontSize: 14,
                     color: const Color(0xFF64748B),
@@ -343,15 +388,14 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             height: 52,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: _isActive
-                    ? const Color(0xFF16A34A)
-                    : KhilonjiyaUI.primary,
+                backgroundColor:
+                    _isActive ? const Color(0xFF16A34A) : KhilonjiyaUI.primary,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
                 ),
                 elevation: 0,
               ),
-              onPressed: _isActive ? null : _startPayment,
+              onPressed: _paying ? null : _startPayment,
               child: _paying
                   ? const SizedBox(
                       width: 22,
@@ -362,7 +406,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                       ),
                     )
                   : Text(
-                      _isActive ? "Subscription Active" : "Subscribe Now",
+                      buttonText,
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w900,
@@ -376,7 +420,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
           Center(
             child: Text(
-              "Cancel anytime • No hidden charges",
+              "No hidden charges • Manual renewal",
               style: KhilonjiyaUI.sub.copyWith(
                 fontSize: 12.2,
                 color: const Color(0xFF94A3B8),
