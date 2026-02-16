@@ -12,9 +12,6 @@ import '../saved_jobs_page.dart';
 import '../profile_performance_page.dart';
 import '../profile_edit_page.dart';
 
-// Subscription page
-import '../subscription_page.dart';
-
 // ✅ NEW PAGES
 import '../settings_page.dart';
 import '../help_page.dart';
@@ -22,17 +19,20 @@ import '../help_page.dart';
 class NaukriDrawer extends StatelessWidget {
   final String userName;
   final int profileCompletion;
-  final VoidCallback onClose;
 
   // ✅ NEW
   final bool isProActive;
+  final VoidCallback onUpgradeTap;
+
+  final VoidCallback onClose;
 
   const NaukriDrawer({
     Key? key,
     required this.userName,
     required this.profileCompletion,
-    required this.onClose,
     required this.isProActive,
+    required this.onUpgradeTap,
+    required this.onClose,
   }) : super(key: key);
 
   // ------------------------------------------------------------
@@ -67,8 +67,9 @@ class NaukriDrawer extends StatelessWidget {
     _openPage(context, const ProfileEditPage());
   }
 
-  void _openSubscription(BuildContext context) {
-    _openPage(context, const SubscriptionPage());
+  void _openUpgrade(BuildContext context) {
+    _closeDrawer(context);
+    onUpgradeTap();
   }
 
   // ------------------------------------------------------------
@@ -99,47 +100,49 @@ class NaukriDrawer extends StatelessWidget {
   }
 
   // ------------------------------------------------------------
-  // NAME RULE (FAKE NAME => Your Profile)
+  // PLAY STORE (TEMP DUMMY LINK)
   // ------------------------------------------------------------
-  String _displayName(String raw) {
-    final n = raw.trim();
+  Future<void> _openPlayStoreRating() async {
+    // TEMP dummy link (replace later with your real Play Store URL)
+    const url = "https://play.google.com/store/apps/details?id=com.khilonjiya.app";
 
-    if (n.isEmpty) return "Your Profile";
+    final uri = Uri.parse(url);
 
-    // fake name pattern: user<mobile>
-    // examples:
-    // user9876543210
-    // user+919876543210
-    final lower = n.toLowerCase();
-    final isFake = RegExp(r'^user[\+\d]+$').hasMatch(lower);
-
-    if (isFake) return "Your Profile";
-
-    return n;
+    if (!await canLaunchUrl(uri)) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   // ------------------------------------------------------------
-  // PLAYSTORE (DUMMY)
+  // NAME DISPLAY LOGIC
+  // - If Supabase default name is like "user<mobile>"
+  // - Always show "Your Profile"
+  // - Else show "Pankaj's Profile"
   // ------------------------------------------------------------
-  Future<void> _openPlaystore() async {
-    // ✅ replace later with your real link
-    const dummy =
-        "https://play.google.com/store/apps/details?id=com.example.khilonjiya";
+  String _displayName() {
+    final raw = userName.trim();
 
-    final uri = Uri.parse(dummy);
+    if (raw.isEmpty) return "Your Profile";
 
-    await launchUrl(
-      uri,
-      mode: LaunchMode.externalApplication,
-    );
+    final lower = raw.toLowerCase();
+
+    // Example fake names:
+    // user9876543210
+    // user_9876543210
+    // user-9876543210
+    if (lower.startsWith("user")) {
+      // if it contains any digit -> treat as fake default name
+      final hasDigits = RegExp(r'\d').hasMatch(lower);
+      if (hasDigits) return "Your Profile";
+    }
+
+    // Real name
+    return "$raw's Profile";
   }
 
   @override
   Widget build(BuildContext context) {
     final p = profileCompletion.clamp(0, 100);
     final value = p / 100;
-
-    final displayName = _displayName(userName);
 
     return Drawer(
       backgroundColor: Colors.white,
@@ -198,7 +201,9 @@ class NaukriDrawer extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  displayName,
+                                  _displayName(),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: KhilonjiyaUI.hTitle.copyWith(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w900,
@@ -226,10 +231,10 @@ class NaukriDrawer extends StatelessWidget {
                   const SizedBox(height: 14),
 
                   // ------------------------------------------------------------
-                  // PRO CARD
+                  // UPGRADE / PRO CARD
                   // ------------------------------------------------------------
                   InkWell(
-                    onTap: () => _openSubscription(context),
+                    onTap: () => _openUpgrade(context),
                     borderRadius: KhilonjiyaUI.r16,
                     child: Container(
                       padding: const EdgeInsets.all(14),
@@ -280,15 +285,15 @@ class NaukriDrawer extends StatelessWidget {
                                     fontWeight: FontWeight.w900,
                                   ),
                                 ),
-                                const SizedBox(height: 3),
+                                const SizedBox(height: 2),
                                 Text(
                                   isProActive
-                                      ? "Active subscription"
-                                      : "Get more visibility & premium jobs",
+                                      ? "Subscription active"
+                                      : "Unlock premium job features",
                                   style: KhilonjiyaUI.sub.copyWith(
-                                    fontSize: 12.2,
-                                    color: const Color(0xFF64748B),
+                                    fontSize: 12.4,
                                     fontWeight: FontWeight.w700,
+                                    color: const Color(0xFF64748B),
                                   ),
                                 ),
                               ],
@@ -375,6 +380,9 @@ class NaukriDrawer extends StatelessWidget {
 
                   const SizedBox(height: 8),
 
+                  // ------------------------------------------------------------
+                  // LOGOUT (BOTTOM)
+                  // ------------------------------------------------------------
                   _menuItem(
                     context,
                     icon: Icons.logout_rounded,
@@ -391,7 +399,7 @@ class NaukriDrawer extends StatelessWidget {
             ),
 
             // ------------------------------------------------------------
-            // FEEDBACK STRIP (UPDATED)
+            // FEEDBACK STRIP (ONLY THUMBS UP)
             // ------------------------------------------------------------
             Container(
               padding: const EdgeInsets.all(16),
@@ -410,7 +418,7 @@ class NaukriDrawer extends StatelessWidget {
                     ),
                   ),
                   InkWell(
-                    onTap: _openPlaystore,
+                    onTap: _openPlayStoreRating,
                     borderRadius: BorderRadius.circular(14),
                     child: Container(
                       width: 42,
