@@ -1,4 +1,4 @@
-// File: lib/services/job_seeker_home_service.dart
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -28,12 +28,6 @@ class JobSeekerHomeService {
   // COMMON SELECT (Job + Company + Business Type)
   // ============================================================
 
-  /// IMPORTANT:
-  /// This now includes:
-  /// - companies.business_type_id
-  /// - companies.business_types_master (type_name, logo_url)
-  ///
-  /// So UI can show the business type logo.
   String get _jobWithCompanySelect => '''
     *,
     companies (
@@ -59,139 +53,179 @@ class JobSeekerHomeService {
   ''';
 
   // ============================================================
-  // ✅ SUBSCRIPTION (PRO)
+  // LOCATION HELPERS (Assam nearby logic)
   // ============================================================
 
-  /// Returns the subscription row for the current user.
+  /// We treat "Assam user" as:
+  /// - user_profiles.current_state == "Assam"
+  /// OR
+  /// - user_profiles.current_city / location contains "Assam"
   ///
-  /// Table: subscriptions
-  /// status: inactive | active | expired
-  Future<Map<String, dynamic>?> getMySubscription() async {
+  /// You can tighten this later.
+  Future<bool> isUserInAssam() async {
     _ensureAuthenticatedSync();
     final userId = _userId();
 
+    try {
+      final p = await _db
+          .from('user_profiles')
+          .select('current_state, current_city, location')
+          .eq('id', userId)
+          .maybeSingle();
+
+      if (p == null) return false;
+
+      final state = (p['current_state'] ?? '').toString().trim().toLowerCase();
+      final city = (p['current_city'] ?? '').toString().trim().toLowerCase();
+      final loc = (p['location'] ?? '').toString().trim().toLowerCase();
+
+      if (state == 'assam') return true;
+      if (city.contains('assam')) return true;
+      if (loc.contains('assam')) return true;
+
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Gets the user's last known GPS.
+  /// We will read from:
+  /// - user_profiles.current_latitude
+  /// - user_profiles.current_longitude
+  Future<Map<String, double>?> getMyCurrentLatLngFromProfile() async {
+    _ensureAuthenticatedSync();
+    final userId = _userId();
+
+    try {
+      final p = await _db
+          .from('user_profiles')
+          .select('current_latitude, current_longitude')
+          .eq('id', userId)
+          .maybeSingle();
+
+      if (p == null) return null;
+
+      double? toDouble(dynamic v) {
+        if (v == null) return null;
+        if (v is double) return v;
+        if (v is int) return v.toDouble();
+        return double.tryParse(v.toString());
+      }
+
+      final lat = toDouble(p['current_latitude']);
+      final lng = toDouble(p['current_longitude']);
+
+      if (lat == null || lng == null) return null;
+      return {'lat': lat, 'lng': lng};
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetch Assam districts master list.
+  Future<List<Map<String, dynamic>>> fetchAssamDistrictMaster() async {
     final res = await _db
-        .from('subscriptions')
-        .select('id, user_id, status, plan_price, starts_at, expires_at')
-        .eq('user_id', userId)
-        .maybeSingle();
+        .from('assam_districts_master')
+        .select('district_name, latitude, longitude')
+        .order('district_name', ascending: true);
 
-    if (res == null) return null;
-    return Map<String, dynamic>.from(res);
+    return List<Map<String, dynamic>>.from(res);
   }
 
-  /// True if subscription is active AND not expired.
-  Future<bool> isProActive() async {
-    final sub = await getMySubscription();
-    if (sub == null) return false;
+  /// Distance (km) using Haversine
+  double _haversineKm(double lat1, double lon1, double lat2, double lon2) {
+    const r = 6371.0;
+    final dLat = _deg2rad(lat2 - lat1);
+    final dLon = _deg2rad(lon2 - lon1);
 
-    final status = (sub['status'] ?? 'inactive').toString();
+    final a = sin(dLat / 2) * sin(dLat / 2) +
+        cos(_deg2rad(lat1)) *
+            cos(_deg2rad(lat2)) *
+            sin(dLon / 2) *
+            sin(dLon / 2);
 
-    if (status != 'active') return false;
-
-    final expiresAtRaw = sub['expires_at']?.toString();
-    if (expiresAtRaw == null || expiresAtRaw.trim().isEmpty) return false;
-
-    final expiresAt = DateTime.tryParse(expiresAtRaw);
-    if (expiresAt == null) return false;
-
-    return expiresAt.isAfter(DateTime.now());
+    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
+    return r * c;
   }
 
-  /// Calls Edge Function: create_razorpay_order
-  ///
-  /// Returns:
-  /// {
-  ///   "order_id": "...",
-  ///   "amount": 99900,
-  ///   "currency": "INR",
-  ///   "key_id": "rzp_live_xxx"
-  /// }
-  Future<Map<String, dynamic>> createProOrder({
-    int amountRupees = 999,
-    String planKey = 'pro_monthly',
+  double _deg2rad(double deg) => deg * (pi / 180.0);
+
+  /// Finds nearest Assam district name based on GPS.
+  Future<String?> getNearestAssamDistrictName({
+    required double userLat,
+    required double userLng,
   }) async {
-    _ensureAuthenticatedSync();
+    try {
+      final districts = await fetchAssamDistrictMaster();
+      if (districts.isEmpty) return null;
 
-    final userId = _userId();
+      String? best;
+      double bestDist = 999999;
 
-    final payload = {
-      'user_id': userId,
-      'amount_rupees': amountRupees,
-      'plan_key': planKey,
-    };
+      for (final d in districts) {
+        final name = (d['district_name'] ?? '').toString().trim();
+        if (name.isEmpty) continue;
 
-    final res =
-        await _db.functions.invoke('create_razorpay_order', body: payload);
+        final lat = double.tryParse(d['latitude'].toString());
+        final lng = double.tryParse(d['longitude'].toString());
 
-    if (res.status != 200) {
-      throw Exception(
-        'create_razorpay_order failed: ${res.status} ${res.data}',
-      );
+        if (lat == null || lng == null) continue;
+
+        final dist = _haversineKm(userLat, userLng, lat, lng);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = name;
+        }
+      }
+
+      return best;
+    } catch (_) {
+      return null;
     }
-
-    final data = res.data;
-    if (data == null || data is! Map) {
-      throw Exception('Invalid create_razorpay_order response');
-    }
-
-    return Map<String, dynamic>.from(data);
   }
 
-  /// Calls Edge Function: verify_razorpay_payment
-  ///
-  /// Must send:
-  /// - razorpay_order_id
-  /// - razorpay_payment_id
-  /// - razorpay_signature
-  ///
-  /// Edge Function will:
-  /// - Verify signature using RAZORPAY_KEY_SECRET
-  /// - Mark payment paid in DB
-  /// - Activate subscription in subscriptions table (30 days)
-  Future<bool> verifyProPayment({
-    required String razorpayOrderId,
-    required String razorpayPaymentId,
-    required String razorpaySignature,
-    int amountRupees = 999,
-    String planKey = 'pro_monthly',
+  /// Returns Assam districts ordered by distance from user's GPS.
+  Future<List<String>> getAssamDistrictsByDistance({
+    required double userLat,
+    required double userLng,
   }) async {
-    _ensureAuthenticatedSync();
+    try {
+      final districts = await fetchAssamDistrictMaster();
+      if (districts.isEmpty) return [];
 
-    final userId = _userId();
+      final scored = <Map<String, dynamic>>[];
 
-    final payload = {
-      'user_id': userId,
-      'razorpay_order_id': razorpayOrderId,
-      'razorpay_payment_id': razorpayPaymentId,
-      'razorpay_signature': razorpaySignature,
-      'amount_rupees': amountRupees,
-      'plan_key': planKey,
-    };
+      for (final d in districts) {
+        final name = (d['district_name'] ?? '').toString().trim();
+        if (name.isEmpty) continue;
 
-    final res =
-        await _db.functions.invoke('verify_razorpay_payment', body: payload);
+        final lat = double.tryParse(d['latitude'].toString());
+        final lng = double.tryParse(d['longitude'].toString());
+        if (lat == null || lng == null) continue;
 
-    if (res.status != 200) {
-      throw Exception(
-        'verify_razorpay_payment failed: ${res.status} ${res.data}',
-      );
+        final dist = _haversineKm(userLat, userLng, lat, lng);
+
+        scored.add({
+          'name': name,
+          'dist': dist,
+        });
+      }
+
+      scored.sort((a, b) {
+        final da = (a['dist'] as double);
+        final db = (b['dist'] as double);
+        return da.compareTo(db);
+      });
+
+      return scored.map((e) => e['name'].toString()).toList();
+    } catch (_) {
+      return [];
     }
-
-    final data = res.data;
-    if (data == null || data is! Map) return false;
-
-    final ok = (data['success'] ?? false) == true;
-    return ok;
-  }
-
-  /// After payment, call this to re-check subscription row.
-  Future<bool> refreshProStatus() async {
-    return isProActive();
   }
 
   // ============================================================
-  // JOB FEED (BASE)
+  // JOB FEED (BASE) - PAGINATED
   // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchJobs({
@@ -214,23 +248,145 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // LATEST JOBS
+  // LATEST JOBS (PAGINATED)
   // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchLatestJobs({
-    int limit = 40,
+    int offset = 0,
+    int limit = 20,
   }) async {
-    return fetchJobs(limit: limit);
+    return fetchJobs(offset: offset, limit: limit);
   }
 
   // ============================================================
-  // JOBS NEARBY (fallback)
+  // JOBS POSTED TODAY (PAGINATED)
   // ============================================================
 
-  Future<List<Map<String, dynamic>>> fetchJobsNearby({
-    int limit = 40,
+  Future<List<Map<String, dynamic>>> fetchJobsPostedToday({
+    int offset = 0,
+    int limit = 20,
   }) async {
-    return fetchJobs(limit: limit);
+    _ensureAuthenticatedSync();
+
+    final nowIso = DateTime.now().toIso8601String();
+
+    final now = DateTime.now();
+    final start = DateTime(now.year, now.month, now.day);
+    final end = start.add(const Duration(days: 1));
+
+    final res = await _db
+        .from('job_listings')
+        .select(_jobWithCompanySelect)
+        .eq('status', 'active')
+        .gte('expires_at', nowIso)
+        .gte('created_at', start.toIso8601String())
+        .lt('created_at', end.toIso8601String())
+        .order('created_at', ascending: false)
+        .range(offset, offset + limit - 1);
+
+    return List<Map<String, dynamic>>.from(res);
+  }
+
+  // ============================================================
+  // JOBS NEARBY (PAGINATED + Assam logic)
+  // ============================================================
+
+  /// FINAL LOGIC:
+  /// - If user is not in Assam -> return Latest Jobs
+  /// - If user has no GPS -> return Latest Jobs
+  /// - Else:
+  ///     1) order districts by distance
+  ///     2) fetch jobs in that district order
+  ///
+  /// Pagination is done AFTER district ordering:
+  /// - We fetch a chunk from DB and then slice.
+  ///
+  /// This is not perfect DB-level pagination but works well for Assam.
+  Future<List<Map<String, dynamic>>> fetchJobsNearby({
+    int offset = 0,
+    int limit = 20,
+  }) async {
+    _ensureAuthenticatedSync();
+
+    final inAssam = await isUserInAssam();
+    if (!inAssam) {
+      // Outside Assam => Nearby = Latest
+      return fetchLatestJobs(offset: offset, limit: limit);
+    }
+
+    final gps = await getMyCurrentLatLngFromProfile();
+    if (gps == null) {
+      // Assam but no GPS => Nearby = Latest
+      return fetchLatestJobs(offset: offset, limit: limit);
+    }
+
+    final userLat = gps['lat']!;
+    final userLng = gps['lng']!;
+
+    final districtsOrdered = await getAssamDistrictsByDistance(
+      userLat: userLat,
+      userLng: userLng,
+    );
+
+    if (districtsOrdered.isEmpty) {
+      return fetchLatestJobs(offset: offset, limit: limit);
+    }
+
+    final nowIso = DateTime.now().toIso8601String();
+
+    // NOTE:
+    // Supabase `.inFilter()` supports ordering by created_at,
+    // but NOT by custom district order.
+    //
+    // So we:
+    // 1) fetch jobs from Assam districts
+    // 2) sort in Dart using district distance order
+    // 3) paginate in Dart
+
+    final res = await _db
+        .from('job_listings')
+        .select(_jobWithCompanySelect)
+        .eq('status', 'active')
+        .gte('expires_at', nowIso)
+        .inFilter('district', districtsOrdered)
+        .order('created_at', ascending: false)
+        .limit(800); // enough for Assam MVP
+
+    final all = List<Map<String, dynamic>>.from(res);
+
+    // district priority map
+    final districtRank = <String, int>{};
+    for (int i = 0; i < districtsOrdered.length; i++) {
+      districtRank[districtsOrdered[i].toLowerCase()] = i;
+    }
+
+    // sort:
+    // 1) district rank
+    // 2) created_at desc
+    all.sort((a, b) {
+      final da = (a['district'] ?? '').toString().trim().toLowerCase();
+      final db = (b['district'] ?? '').toString().trim().toLowerCase();
+
+      final ra = districtRank[da] ?? 9999;
+      final rb = districtRank[db] ?? 9999;
+
+      if (ra != rb) return ra.compareTo(rb);
+
+      final ca = DateTime.tryParse((a['created_at'] ?? '').toString());
+      final cb = DateTime.tryParse((b['created_at'] ?? '').toString());
+
+      if (ca == null && cb == null) return 0;
+      if (ca == null) return 1;
+      if (cb == null) return -1;
+
+      return cb.compareTo(ca); // latest first
+    });
+
+    // paginate in Dart
+    if (offset >= all.length) return [];
+
+    final end = (offset + limit) > all.length ? all.length : (offset + limit);
+    return all.sublist(offset, end);
   }
 
   // ============================================================
@@ -257,12 +413,13 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // COMPANY JOBS
+  // COMPANY JOBS (PAGINATED)
   // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchCompanyJobs({
     required String companyId,
-    int limit = 50,
+    int offset = 0,
+    int limit = 20,
   }) async {
     _ensureAuthenticatedSync();
 
@@ -275,17 +432,23 @@ class JobSeekerHomeService {
         .eq('company_id', companyId)
         .gte('expires_at', nowIso)
         .order('created_at', ascending: false)
-        .limit(limit);
+        .range(offset, offset + limit - 1);
 
     return List<Map<String, dynamic>>.from(res);
   }
 
   // ============================================================
-  // RECOMMENDED JOBS
+  // RECOMMENDED JOBS (PAGINATED)
   // ============================================================
 
+  /// IMPORTANT:
+  /// Recommendations table gives job_ids + match_score.
+  ///
+  /// We fetch those ids, then fetch jobs.
+  /// Then we sort again in Dart by match_score.
   Future<List<Map<String, dynamic>>> getRecommendedJobs({
-    int limit = 40,
+    int offset = 0,
+    int limit = 20,
   }) async {
     _ensureAuthenticatedSync();
 
@@ -293,17 +456,18 @@ class JobSeekerHomeService {
     final userId = _userId();
 
     try {
+      // Fetch more than needed because we will slice later.
       final rec = await _db
           .from('job_recommendations')
           .select('job_id, match_score')
           .eq('user_id', userId)
           .order('match_score', ascending: false)
-          .limit(limit);
+          .range(offset, offset + limit - 1);
 
       final recList = List<Map<String, dynamic>>.from(rec);
 
       if (recList.isEmpty) {
-        return fetchJobs(limit: limit);
+        return fetchLatestJobs(offset: offset, limit: limit);
       }
 
       final ids = recList.map((e) => e['job_id'].toString()).toList();
@@ -318,6 +482,7 @@ class JobSeekerHomeService {
 
       final list = List<Map<String, dynamic>>.from(jobs);
 
+      // map score
       final scoreMap = <String, int>{};
       for (final r in recList) {
         final id = r['job_id'].toString();
@@ -339,14 +504,15 @@ class JobSeekerHomeService {
 
       return list;
     } catch (_) {
-      return fetchJobs(limit: limit);
+      return fetchLatestJobs(offset: offset, limit: limit);
     }
   }
 
   Future<List<Map<String, dynamic>>> getJobsBasedOnActivity({
-    int limit = 50,
+    int offset = 0,
+    int limit = 20,
   }) async {
-    return getRecommendedJobs(limit: limit);
+    return getRecommendedJobs(offset: offset, limit: limit);
   }
 
   // ============================================================
@@ -456,7 +622,7 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // ✅ FOLLOW COMPANY
+  // FOLLOW COMPANY
   // ============================================================
 
   Future<bool> isCompanyFollowed(String companyId) async {
@@ -506,7 +672,7 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // ✅ COMPANY REVIEWS
+  // COMPANY REVIEWS
   // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchCompanyReviews({
@@ -531,7 +697,8 @@ class JobSeekerHomeService {
 
   Future<List<Map<String, dynamic>>> fetchJobsByMinSalaryMonthly({
     required int minMonthlySalary,
-    int limit = 80,
+    int offset = 0,
+    int limit = 20,
   }) async {
     _ensureAuthenticatedSync();
 
@@ -548,7 +715,7 @@ class JobSeekerHomeService {
         )
         .gte('salary_max', minSalary)
         .order('salary_max', ascending: false)
-        .limit(limit);
+        .range(offset, offset + limit - 1);
 
     return List<Map<String, dynamic>>.from(res);
   }
@@ -568,7 +735,10 @@ class JobSeekerHomeService {
     return res.map<String>((e) => e['job_id'].toString()).toSet();
   }
 
-  Future<List<Map<String, dynamic>>> getSavedJobs() async {
+  Future<List<Map<String, dynamic>>> getSavedJobs({
+    int offset = 0,
+    int limit = 20,
+  }) async {
     _ensureAuthenticatedSync();
 
     final userId = _userId();
@@ -576,10 +746,11 @@ class JobSeekerHomeService {
     final res = await _db
         .from('saved_jobs')
         .select(
-          'job_listings($_jobWithCompanySelect)',
+          'saved_at, job_listings($_jobWithCompanySelect)',
         )
         .eq('user_id', userId)
-        .order('saved_at', ascending: false);
+        .order('saved_at', ascending: false)
+        .range(offset, offset + limit - 1);
 
     return res.map<Map<String, dynamic>>((e) {
       final j = e['job_listings'];
@@ -648,11 +819,12 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // APPLIED JOBS
+  // APPLIED JOBS (PAGINATED)
   // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchAppliedJobs({
-    int limit = 80,
+    int offset = 0,
+    int limit = 20,
   }) async {
     _ensureAuthenticatedSync();
 
@@ -669,7 +841,7 @@ class JobSeekerHomeService {
         ''')
         .eq('user_id', userId)
         .order('applied_at', ascending: false)
-        .limit(limit);
+        .range(offset, offset + limit - 1);
 
     final rows = List<Map<String, dynamic>>.from(res);
 
@@ -994,6 +1166,110 @@ class JobSeekerHomeService {
         .eq('is_read', false);
 
     return (res as List).length;
+  }
+
+  // ============================================================
+  // SUBSCRIPTION (PRO)
+  // ============================================================
+
+  Future<Map<String, dynamic>?> getMySubscription() async {
+    _ensureAuthenticatedSync();
+    final userId = _userId();
+
+    final res = await _db
+        .from('subscriptions')
+        .select('id, user_id, status, plan_price, starts_at, expires_at')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+    if (res == null) return null;
+    return Map<String, dynamic>.from(res);
+  }
+
+  Future<bool> isProActive() async {
+    final sub = await getMySubscription();
+    if (sub == null) return false;
+
+    final status = (sub['status'] ?? 'inactive').toString();
+    if (status != 'active') return false;
+
+    final expiresAtRaw = sub['expires_at']?.toString();
+    if (expiresAtRaw == null || expiresAtRaw.trim().isEmpty) return false;
+
+    final expiresAt = DateTime.tryParse(expiresAtRaw);
+    if (expiresAt == null) return false;
+
+    return expiresAt.isAfter(DateTime.now());
+  }
+
+  Future<Map<String, dynamic>> createProOrder({
+    int amountRupees = 999,
+    String planKey = 'pro_monthly',
+  }) async {
+    _ensureAuthenticatedSync();
+
+    final userId = _userId();
+
+    final payload = {
+      'user_id': userId,
+      'amount_rupees': amountRupees,
+      'plan_key': planKey,
+    };
+
+    final res =
+        await _db.functions.invoke('create_razorpay_order', body: payload);
+
+    if (res.status != 200) {
+      throw Exception(
+        'create_razorpay_order failed: ${res.status} ${res.data}',
+      );
+    }
+
+    final data = res.data;
+    if (data == null || data is! Map) {
+      throw Exception('Invalid create_razorpay_order response');
+    }
+
+    return Map<String, dynamic>.from(data);
+  }
+
+  Future<bool> verifyProPayment({
+    required String razorpayOrderId,
+    required String razorpayPaymentId,
+    required String razorpaySignature,
+    int amountRupees = 999,
+    String planKey = 'pro_monthly',
+  }) async {
+    _ensureAuthenticatedSync();
+
+    final userId = _userId();
+
+    final payload = {
+      'user_id': userId,
+      'razorpay_order_id': razorpayOrderId,
+      'razorpay_payment_id': razorpayPaymentId,
+      'razorpay_signature': razorpaySignature,
+      'amount_rupees': amountRupees,
+      'plan_key': planKey,
+    };
+
+    final res =
+        await _db.functions.invoke('verify_razorpay_payment', body: payload);
+
+    if (res.status != 200) {
+      throw Exception(
+        'verify_razorpay_payment failed: ${res.status} ${res.data}',
+      );
+    }
+
+    final data = res.data;
+    if (data == null || data is! Map) return false;
+
+    return (data['success'] ?? false) == true;
+  }
+
+  Future<bool> refreshProStatus() async {
+    return isProActive();
   }
 
   // ============================================================
