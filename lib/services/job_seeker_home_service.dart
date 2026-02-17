@@ -56,6 +56,10 @@ class JobSeekerHomeService {
   // LOCATION HELPERS (Assam nearby logic)
   // ============================================================
 
+  /// We treat "Assam user" as:
+  /// - user_profiles.current_state == "Assam"
+  /// OR
+  /// - user_profiles.current_city / location contains "Assam"
   Future<bool> isUserInAssam() async {
     _ensureAuthenticatedSync();
     final userId = _userId();
@@ -83,6 +87,9 @@ class JobSeekerHomeService {
     }
   }
 
+  /// Reads from:
+  /// - user_profiles.current_latitude
+  /// - user_profiles.current_longitude
   Future<Map<String, double>?> getMyCurrentLatLngFromProfile() async {
     _ensureAuthenticatedSync();
     final userId = _userId();
@@ -122,8 +129,7 @@ class JobSeekerHomeService {
     return List<Map<String, dynamic>>.from(res);
   }
 
-  double _deg2rad(double deg) => deg * (pi / 180.0);
-
+  /// Distance (km) using Haversine
   double _haversineKm(double lat1, double lon1, double lat2, double lon2) {
     const r = 6371.0;
     final dLat = _deg2rad(lat2 - lat1);
@@ -138,6 +144,8 @@ class JobSeekerHomeService {
     final c = 2 * atan2(sqrt(a), sqrt(1 - a));
     return r * c;
   }
+
+  double _deg2rad(double deg) => deg * (pi / 180.0);
 
   Future<List<String>> getAssamDistrictsByDistance({
     required double userLat,
@@ -159,7 +167,10 @@ class JobSeekerHomeService {
 
         final dist = _haversineKm(userLat, userLng, lat, lng);
 
-        scored.add({'name': name, 'dist': dist});
+        scored.add({
+          'name': name,
+          'dist': dist,
+        });
       }
 
       scored.sort((a, b) {
@@ -241,6 +252,14 @@ class JobSeekerHomeService {
   // JOBS NEARBY (PAGINATED + Assam logic)
   // ============================================================
 
+  /// FINAL LOGIC:
+  /// - If user is not in Assam -> return Latest Jobs
+  /// - If user has no GPS -> return Latest Jobs
+  /// - Else:
+  ///     1) order districts by distance
+  ///     2) fetch jobs in those districts
+  ///     3) sort in Dart using district rank
+  ///     4) paginate in Dart
   Future<List<Map<String, dynamic>>> fetchJobsNearby({
     int offset = 0,
     int limit = 20,
@@ -271,7 +290,6 @@ class JobSeekerHomeService {
 
     final nowIso = DateTime.now().toIso8601String();
 
-    // fetch large set, then sort + slice in Dart
     final res = await _db
         .from('job_listings')
         .select(_jobWithCompanySelect)
@@ -283,11 +301,15 @@ class JobSeekerHomeService {
 
     final all = List<Map<String, dynamic>>.from(res);
 
+    // district priority map
     final districtRank = <String, int>{};
     for (int i = 0; i < districtsOrdered.length; i++) {
       districtRank[districtsOrdered[i].toLowerCase()] = i;
     }
 
+    // sort:
+    // 1) district rank
+    // 2) created_at desc
     all.sort((a, b) {
       final da = (a['district'] ?? '').toString().trim().toLowerCase();
       final db = (b['district'] ?? '').toString().trim().toLowerCase();
@@ -308,134 +330,13 @@ class JobSeekerHomeService {
     });
 
     if (offset >= all.length) return [];
-    final end = (offset + limit) > all.length ? all.length : (offset + limit);
 
+    final end = (offset + limit) > all.length ? all.length : (offset + limit);
     return all.sublist(offset, end);
   }
 
   // ============================================================
-  // PREMIUM JOBS
-  // ============================================================
-
-  Future<List<Map<String, dynamic>>> fetchPremiumJobs({
-    int limit = 5,
-  }) async {
-    _ensureAuthenticatedSync();
-
-    final nowIso = DateTime.now().toIso8601String();
-
-    final res = await _db
-        .from('job_listings')
-        .select(_jobWithCompanySelect)
-        .eq('status', 'active')
-        .eq('is_premium', true)
-        .gte('expires_at', nowIso)
-        .order('created_at', ascending: false)
-        .limit(limit);
-
-    return List<Map<String, dynamic>>.from(res);
-  }
-
-  // ============================================================
-  // COMPANY JOBS (PAGINATED)
-  // ============================================================
-
-  Future<List<Map<String, dynamic>>> fetchCompanyJobs({
-    required String companyId,
-    int offset = 0,
-    int limit = 20,
-  }) async {
-    _ensureAuthenticatedSync();
-
-    final nowIso = DateTime.now().toIso8601String();
-
-    final res = await _db
-        .from('job_listings')
-        .select(_jobWithCompanySelect)
-        .eq('status', 'active')
-        .eq('company_id', companyId)
-        .gte('expires_at', nowIso)
-        .order('created_at', ascending: false)
-        .range(offset, offset + limit - 1);
-
-    return List<Map<String, dynamic>>.from(res);
-  }
-
-  // ============================================================
-  // RECOMMENDED JOBS (PAGINATED) - FIXED
-  // ============================================================
-
-  Future<List<Map<String, dynamic>>> getRecommendedJobs({
-    int offset = 0,
-    int limit = 20,
-  }) async {
-    _ensureAuthenticatedSync();
-
-    final nowIso = DateTime.now().toIso8601String();
-    final userId = _userId();
-
-    try {
-      final rec = await _db
-          .from('job_recommendations')
-          .select('job_id, match_score')
-          .eq('user_id', userId)
-          .order('match_score', ascending: false)
-          .range(offset, offset + limit - 1);
-
-      final recList = List<Map<String, dynamic>>.from(rec);
-
-      if (recList.isEmpty) {
-        return fetchLatestJobs(offset: offset, limit: limit);
-      }
-
-      final ids = recList.map((e) => e['job_id'].toString()).toList();
-
-      // IMPORTANT: do NOT limit here, fetch all ids
-      final jobs = await _db
-          .from('job_listings')
-          .select(_jobWithCompanySelect)
-          .inFilter('id', ids)
-          .eq('status', 'active')
-          .gte('expires_at', nowIso);
-
-      final list = List<Map<String, dynamic>>.from(jobs);
-
-      // map score
-      final scoreMap = <String, int>{};
-      for (final r in recList) {
-        final id = r['job_id'].toString();
-        final ms = r['match_score'];
-        final v = (ms is int) ? ms : int.tryParse(ms.toString()) ?? 0;
-        scoreMap[id] = v;
-      }
-
-      for (final j in list) {
-        final id = j['id'].toString();
-        j['match_score'] = scoreMap[id] ?? 0;
-      }
-
-      // sort by match_score desc
-      list.sort((a, b) {
-        final sa = (a['match_score'] ?? 0) as int;
-        final sb = (b['match_score'] ?? 0) as int;
-        return sb.compareTo(sa);
-      });
-
-      return list;
-    } catch (_) {
-      return fetchLatestJobs(offset: offset, limit: limit);
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> getJobsBasedOnActivity({
-    int offset = 0,
-    int limit = 20,
-  }) async {
-    return getRecommendedJobs(offset: offset, limit: limit);
-  }
-
-  // ============================================================
-  // JOBS FILTERED BY SALARY (MONTHLY) - PAGINATED
+  // JOBS FILTERED BY SALARY (MONTHLY)
   // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchJobsByMinSalaryMonthly({
@@ -464,7 +365,363 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // SAVED JOBS (PAGINATED)
+  // RECOMMENDED JOBS (PAGINATED) - FIXED + MIXED LOGIC
+  // ============================================================
+
+  /// NEW RECOMMENDED LOGIC (NO AI YET):
+  ///
+  /// Mix list from:
+  /// 1) preferred_locations (district match)
+  /// 2) current_city (district match)
+  /// 3) education_required match (basic keyword contains)
+  /// 4) latest jobs fallback
+  ///
+  /// Then:
+  /// - remove duplicates
+  /// - sort by priority
+  /// - paginate AFTER mixing
+  Future<List<Map<String, dynamic>>> getRecommendedJobs({
+    int offset = 0,
+    int limit = 20,
+  }) async {
+    _ensureAuthenticatedSync();
+
+    final userId = _userId();
+    final nowIso = DateTime.now().toIso8601String();
+
+    // 1) Load user profile info needed for recommendation
+    List<String> preferredLocations = [];
+    String currentCity = '';
+    String highestEducation = '';
+
+    try {
+      final p = await _db
+          .from('user_profiles')
+          .select('preferred_locations, current_city, highest_education')
+          .eq('id', userId)
+          .maybeSingle();
+
+      if (p != null) {
+        final pl = p['preferred_locations'];
+        if (pl is List) {
+          preferredLocations =
+              pl.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+        }
+
+        currentCity = (p['current_city'] ?? '').toString().trim();
+        highestEducation = (p['highest_education'] ?? '').toString().trim();
+      }
+    } catch (_) {}
+
+    // Normalize
+    final currentCityLower = currentCity.toLowerCase();
+    final eduLower = highestEducation.toLowerCase();
+
+    // We'll build a scored list in Dart
+    final mixed = <Map<String, dynamic>>[];
+    final seen = <String>{};
+
+    // Helper: add jobs with a score
+    void addJobs(List<Map<String, dynamic>> jobs, int score) {
+      for (final j in jobs) {
+        final id = j['id']?.toString() ?? '';
+        if (id.isEmpty) continue;
+        if (seen.contains(id)) continue;
+
+        seen.add(id);
+        j['__rec_score'] = score;
+        mixed.add(j);
+      }
+    }
+
+    // ------------------------------------------------------------
+    // A) Preferred locations
+    // ------------------------------------------------------------
+    if (preferredLocations.isNotEmpty) {
+      try {
+        final res = await _db
+            .from('job_listings')
+            .select(_jobWithCompanySelect)
+            .eq('status', 'active')
+            .gte('expires_at', nowIso)
+            .inFilter('district', preferredLocations)
+            .order('created_at', ascending: false)
+            .limit(120);
+
+        addJobs(List<Map<String, dynamic>>.from(res), 100);
+      } catch (_) {}
+    }
+
+    // ------------------------------------------------------------
+    // B) Current city match (district)
+    // ------------------------------------------------------------
+    if (currentCity.trim().isNotEmpty) {
+      try {
+        final res = await _db
+            .from('job_listings')
+            .select(_jobWithCompanySelect)
+            .eq('status', 'active')
+            .gte('expires_at', nowIso)
+            .ilike('district', '%$currentCityLower%')
+            .order('created_at', ascending: false)
+            .limit(100);
+
+        addJobs(List<Map<String, dynamic>>.from(res), 80);
+      } catch (_) {}
+    }
+
+    // ------------------------------------------------------------
+    // C) Education match (simple keyword contains)
+    // ------------------------------------------------------------
+    if (highestEducation.trim().isNotEmpty) {
+      try {
+        final res = await _db
+            .from('job_listings')
+            .select(_jobWithCompanySelect)
+            .eq('status', 'active')
+            .gte('expires_at', nowIso)
+            .ilike('education_required', '%$eduLower%')
+            .order('created_at', ascending: false)
+            .limit(120);
+
+        addJobs(List<Map<String, dynamic>>.from(res), 60);
+      } catch (_) {}
+    }
+
+    // ------------------------------------------------------------
+    // D) Latest jobs fallback
+    // ------------------------------------------------------------
+    try {
+      final res = await _db
+          .from('job_listings')
+          .select(_jobWithCompanySelect)
+          .eq('status', 'active')
+          .gte('expires_at', nowIso)
+          .order('created_at', ascending: false)
+          .limit(200);
+
+      addJobs(List<Map<String, dynamic>>.from(res), 40);
+    } catch (_) {}
+
+    // ------------------------------------------------------------
+    // Final sort:
+    // 1) rec_score desc
+    // 2) created_at desc
+    // ------------------------------------------------------------
+    mixed.sort((a, b) {
+      final sa = (a['__rec_score'] ?? 0) as int;
+      final sb = (b['__rec_score'] ?? 0) as int;
+      if (sa != sb) return sb.compareTo(sa);
+
+      final ca = DateTime.tryParse((a['created_at'] ?? '').toString());
+      final cb = DateTime.tryParse((b['created_at'] ?? '').toString());
+
+      if (ca == null && cb == null) return 0;
+      if (ca == null) return 1;
+      if (cb == null) return -1;
+
+      return cb.compareTo(ca);
+    });
+
+    // Paginate after mixing
+    if (offset >= mixed.length) return [];
+
+    final end = (offset + limit) > mixed.length ? mixed.length : (offset + limit);
+    final page = mixed.sublist(offset, end);
+
+    // remove internal key
+    for (final j in page) {
+      j.remove('__rec_score');
+    }
+
+    return page;
+  }
+
+  Future<List<Map<String, dynamic>>> getJobsBasedOnActivity({
+    int offset = 0,
+    int limit = 20,
+  }) async {
+    return getRecommendedJobs(offset: offset, limit: limit);
+  }
+
+  // ============================================================
+  // JOB DETAILS HELPERS
+  // ============================================================
+
+  Future<void> trackJobView(String jobId) async {
+    try {
+      final userId = _db.auth.currentUser?.id;
+      if (userId == null) return;
+
+      await _db.from('job_views').insert({
+        'user_id': userId,
+        'job_id': jobId,
+        'viewed_at': DateTime.now().toIso8601String(),
+        'device_type': 'mobile',
+      });
+
+      try {
+        await _db.from('user_job_activity').insert({
+          'user_id': userId,
+          'job_id': jobId,
+          'activity_type': 'viewed',
+          'activity_date': DateTime.now().toIso8601String(),
+        });
+      } catch (_) {}
+    } catch (e) {
+      debugPrint('trackJobView error: $e');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> fetchSimilarJobs({
+    required String jobId,
+    int limit = 12,
+  }) async {
+    _ensureAuthenticatedSync();
+
+    final nowIso = DateTime.now().toIso8601String();
+
+    try {
+      final base = await _db
+          .from('job_listings')
+          .select('job_category_id, district, company_id')
+          .eq('id', jobId)
+          .maybeSingle();
+
+      if (base == null) return [];
+
+      final catId = base['job_category_id'];
+      final district = base['district'];
+      final companyId = base['company_id'];
+
+      final res = await _db
+          .from('job_listings')
+          .select(_jobWithCompanySelect)
+          .eq('status', 'active')
+          .gte('expires_at', nowIso)
+          .neq('id', jobId)
+          .neq('company_id', companyId)
+          .eq('job_category_id', catId)
+          .eq('district', district)
+          .order('created_at', ascending: false)
+          .limit(limit);
+
+      return List<Map<String, dynamic>>.from(res);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<Map<String, dynamic>?> fetchCompanyDetails(String companyId) async {
+    _ensureAuthenticatedSync();
+
+    final res = await _db
+        .from('companies')
+        .select(
+          '''
+          id,
+          name,
+          slug,
+          logo_url,
+          website,
+          description,
+          industry,
+          company_size,
+          founded_year,
+          headquarters_city,
+          headquarters_state,
+          rating,
+          total_reviews,
+          total_jobs,
+          is_verified,
+
+          business_type_id,
+          business_types_master (
+            id,
+            type_name,
+            logo_url
+          )
+        ''',
+        )
+        .eq('id', companyId)
+        .maybeSingle();
+
+    if (res == null) return null;
+    return Map<String, dynamic>.from(res);
+  }
+
+  // ============================================================
+  // FOLLOW COMPANY
+  // ============================================================
+
+  Future<bool> isCompanyFollowed(String companyId) async {
+    _ensureAuthenticatedSync();
+
+    final userId = _userId();
+
+    final res = await _db
+        .from('followed_companies')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('company_id', companyId)
+        .maybeSingle();
+
+    return res != null;
+  }
+
+  Future<bool> toggleFollowCompany(String companyId) async {
+    _ensureAuthenticatedSync();
+
+    final userId = _userId();
+
+    final existing = await _db
+        .from('followed_companies')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('company_id', companyId)
+        .maybeSingle();
+
+    if (existing != null) {
+      await _db
+          .from('followed_companies')
+          .delete()
+          .eq('user_id', userId)
+          .eq('company_id', companyId);
+
+      return false;
+    }
+
+    await _db.from('followed_companies').insert({
+      'user_id': userId,
+      'company_id': companyId,
+      'followed_at': DateTime.now().toIso8601String(),
+    });
+
+    return true;
+  }
+
+  // ============================================================
+  // COMPANY REVIEWS
+  // ============================================================
+
+  Future<List<Map<String, dynamic>>> fetchCompanyReviews({
+    required String companyId,
+    int limit = 20,
+  }) async {
+    _ensureAuthenticatedSync();
+
+    final res = await _db
+        .from('company_reviews')
+        .select('id, rating, review_text, created_at, is_anonymous')
+        .eq('company_id', companyId)
+        .order('created_at', ascending: false)
+        .limit(limit);
+
+    return List<Map<String, dynamic>>.from(res);
+  }
+
+  // ============================================================
+  // SAVED JOBS
   // ============================================================
 
   Future<Set<String>> getUserSavedJobs() async {
@@ -543,6 +800,25 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
+  // APPLY STATUS
+  // ============================================================
+
+  Future<bool> hasAppliedToJob(String jobId) async {
+    _ensureAuthenticatedSync();
+
+    final userId = _userId();
+
+    final res = await _db
+        .from('job_applications_listings')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('listing_id', jobId)
+        .maybeSingle();
+
+    return res != null;
+  }
+
+  // ============================================================
   // APPLIED JOBS (PAGINATED)
   // ============================================================
 
@@ -593,32 +869,265 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // JOB DETAILS HELPERS
+  // HOME SUMMARY
   // ============================================================
 
-  Future<void> trackJobView(String jobId) async {
-    try {
-      final userId = _db.auth.currentUser?.id;
-      if (userId == null) return;
+  Future<Map<String, dynamic>> getHomeProfileSummary() async {
+    final user = _db.auth.currentUser;
 
-      await _db.from('job_views').insert({
-        'user_id': userId,
-        'job_id': jobId,
-        'viewed_at': DateTime.now().toIso8601String(),
-        'device_type': 'mobile',
-      });
-
-      try {
-        await _db.from('user_job_activity').insert({
-          'user_id': userId,
-          'job_id': jobId,
-          'activity_type': 'viewed',
-          'activity_date': DateTime.now().toIso8601String(),
-        });
-      } catch (_) {}
-    } catch (e) {
-      debugPrint('trackJobView error: $e');
+    if (user == null) {
+      return {
+        "profileName": "Your Profile",
+        "profileCompletion": 0,
+        "lastUpdatedText": "Updated recently",
+        "missingDetails": 0,
+      };
     }
+
+    try {
+      final profile = await _db
+          .from('user_profiles')
+          .select(
+            'full_name, profile_completion_percentage, last_profile_update',
+          )
+          .eq('id', user.id)
+          .maybeSingle();
+
+      String profileName = "Your Profile";
+      int completion = 0;
+      String lastUpdatedText = "Updated recently";
+
+      if (profile != null) {
+        final fullName = (profile['full_name'] ?? '').toString().trim();
+        profileName = _firstNameOrFallback(fullName);
+
+        completion =
+            _toInt(profile['profile_completion_percentage']).clamp(0, 100);
+
+        lastUpdatedText =
+            _formatLastUpdated(profile['last_profile_update']?.toString());
+      }
+
+      return {
+        "profileName": profileName,
+        "profileCompletion": completion,
+        "lastUpdatedText": lastUpdatedText,
+        "missingDetails": completion >= 100 ? 0 : 1,
+      };
+    } catch (_) {
+      return {
+        "profileName": "Your Profile",
+        "profileCompletion": 0,
+        "lastUpdatedText": "Updated recently",
+        "missingDetails": 0,
+      };
+    }
+  }
+
+  Future<int> getJobsPostedTodayCount() async {
+    try {
+      final now = DateTime.now();
+      final start = DateTime(now.year, now.month, now.day);
+      final end = start.add(const Duration(days: 1));
+
+      final res = await _db
+          .from('job_listings')
+          .select('id')
+          .eq('status', 'active')
+          .gte('created_at', start.toIso8601String())
+          .lt('created_at', end.toIso8601String());
+
+      return (res as List).length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  // ============================================================
+  // EXPECTED SALARY (PER MONTH)
+  // ============================================================
+
+  Future<int> getExpectedSalaryPerMonth() async {
+    _ensureAuthenticatedSync();
+
+    final userId = _userId();
+
+    try {
+      final profile = await _db
+          .from('user_profiles')
+          .select('expected_salary_min')
+          .eq('id', userId)
+          .maybeSingle();
+
+      if (profile == null) return 0;
+
+      final raw = profile['expected_salary_min'];
+      if (raw == null) return 0;
+
+      if (raw is int) return raw;
+      return int.tryParse(raw.toString()) ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<void> updateExpectedSalaryPerMonth(int salary) async {
+    _ensureAuthenticatedSync();
+
+    final userId = _userId();
+
+    final clean = salary < 0 ? 0 : salary;
+    final max = clean + 5000;
+
+    await _db.from('user_profiles').update({
+      'expected_salary_min': clean,
+      'expected_salary_max': max,
+      'last_profile_update': DateTime.now().toIso8601String(),
+    }).eq('id', userId);
+  }
+
+  // ============================================================
+  // PROFILE
+  // ============================================================
+
+  Future<Map<String, dynamic>> fetchMyProfile() async {
+    _ensureAuthenticatedSync();
+    final userId = _userId();
+
+    final res = await _db
+        .from('user_profiles')
+        .select('''
+          id,
+          full_name,
+          mobile_number,
+          current_city,
+          current_state,
+          location,
+          bio,
+          skills,
+          highest_education,
+          total_experience_years,
+          expected_salary_min,
+          expected_salary_max,
+          notice_period_days,
+          preferred_job_types,
+          profile_completion_percentage,
+          last_profile_update
+        ''')
+        .eq('id', userId)
+        .maybeSingle();
+
+    if (res == null) return {};
+
+    final p = Map<String, dynamic>.from(res);
+
+    return {
+      ...p,
+      'phone': p['mobile_number'],
+      'location_text': p['location'],
+      'preferred_job_type': _preferredJobTypeString(p['preferred_job_types']),
+      'preferred_employment_type': 'Any',
+    };
+  }
+
+  Future<void> updateMyProfile(Map<String, dynamic> payload) async {
+    _ensureAuthenticatedSync();
+    final userId = _userId();
+
+    final mapped = <String, dynamic>{};
+
+    mapped['full_name'] = (payload['full_name'] ?? '').toString().trim();
+    mapped['mobile_number'] = (payload['phone'] ?? '').toString().trim();
+
+    mapped['current_city'] = (payload['current_city'] ?? '').toString().trim();
+    mapped['current_state'] =
+        (payload['current_state'] ?? '').toString().trim();
+
+    mapped['location'] = (payload['location_text'] ?? '').toString().trim();
+
+    mapped['bio'] = (payload['bio'] ?? '').toString().trim();
+    mapped['skills'] = payload['skills'] ?? [];
+
+    mapped['highest_education'] =
+        (payload['highest_education'] ?? '').toString().trim();
+
+    mapped['total_experience_years'] = _toInt(payload['total_experience_years']);
+
+    final expectedSalaryMin = _toInt(payload['expected_salary_min']);
+    mapped['expected_salary_min'] =
+        expectedSalaryMin < 0 ? 0 : expectedSalaryMin;
+    mapped['expected_salary_max'] =
+        (expectedSalaryMin < 0 ? 0 : expectedSalaryMin) + 5000;
+
+    mapped['notice_period_days'] = _toInt(payload['notice_period_days']);
+
+    final jt = (payload['preferred_job_type'] ?? 'Any').toString();
+    mapped['preferred_job_types'] = _preferredJobTypesArray(jt);
+
+    final completion = _calculateProfileCompletion(mapped);
+
+    await _db.from('user_profiles').update({
+      ...mapped,
+      'profile_completion_percentage': completion,
+      'last_profile_update': DateTime.now().toIso8601String(),
+    }).eq('id', userId);
+  }
+
+  String _preferredJobTypeString(dynamic raw) {
+    if (raw == null) return 'Any';
+    if (raw is List) {
+      if (raw.isEmpty) return 'Any';
+      return raw.first.toString();
+    }
+    return raw.toString();
+  }
+
+  List<String> _preferredJobTypesArray(String jobType) {
+    final v = jobType.trim();
+    if (v.isEmpty || v.toLowerCase() == 'any') return [];
+    return [v];
+  }
+
+  int _calculateProfileCompletion(Map<String, dynamic> p) {
+    final fields = [
+      'full_name',
+      'mobile_number',
+      'current_city',
+      'current_state',
+      'highest_education',
+      'total_experience_years',
+      'expected_salary_min',
+      'skills',
+      'bio',
+      'preferred_job_types',
+    ];
+
+    int filled = 0;
+
+    for (final f in fields) {
+      final v = p[f];
+
+      bool ok = false;
+
+      if (v == null) {
+        ok = false;
+      } else if (v is String) {
+        ok = v.trim().isNotEmpty;
+      } else if (v is int) {
+        ok = v > 0;
+      } else if (v is double) {
+        ok = v > 0;
+      } else if (v is List) {
+        ok = v.isNotEmpty;
+      } else {
+        ok = v.toString().trim().isNotEmpty;
+      }
+
+      if (ok) filled++;
+    }
+
+    final pct = ((filled / fields.length) * 100).round();
+    return pct.clamp(0, 100);
   }
 
   // ============================================================
