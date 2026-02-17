@@ -81,16 +81,23 @@ class _JobsPostedTodayPageState extends State<JobsPostedTodayPage> {
         limit: _pageSize,
       );
 
-      _jobs = first;
-      _offset = _jobs.length;
-      _hasMore = first.length >= _pageSize;
-    } catch (_) {
-      _jobs = [];
-      _hasMore = false;
-    }
+      if (_isDisposed) return;
 
-    if (_isDisposed) return;
-    setState(() => _loading = false);
+      setState(() {
+        _jobs = first;
+        _offset = _jobs.length;
+        _hasMore = first.length >= _pageSize;
+        _loading = false;
+      });
+    } catch (_) {
+      if (_isDisposed) return;
+
+      setState(() {
+        _jobs = [];
+        _hasMore = false;
+        _loading = false;
+      });
+    }
   }
 
   // ------------------------------------------------------------
@@ -98,6 +105,7 @@ class _JobsPostedTodayPageState extends State<JobsPostedTodayPage> {
   // ------------------------------------------------------------
   Future<void> _loadMore() async {
     if (_loadingMore || !_hasMore) return;
+    if (_isDisposed) return;
 
     setState(() => _loadingMore = true);
 
@@ -107,18 +115,23 @@ class _JobsPostedTodayPageState extends State<JobsPostedTodayPage> {
         limit: _pageSize,
       );
 
-      if (more.isEmpty) {
-        _hasMore = false;
-      } else {
-        _jobs.addAll(more);
-        _offset = _jobs.length;
+      if (_isDisposed) return;
 
-        if (more.length < _pageSize) {
+      setState(() {
+        if (more.isEmpty) {
           _hasMore = false;
+        } else {
+          _jobs.addAll(more);
+          _offset = _jobs.length;
+
+          if (more.length < _pageSize) {
+            _hasMore = false;
+          }
         }
-      }
+      });
     } catch (_) {
-      _hasMore = false;
+      if (_isDisposed) return;
+      setState(() => _hasMore = false);
     }
 
     if (_isDisposed) return;
@@ -208,7 +221,6 @@ class _JobsPostedTodayPageState extends State<JobsPostedTodayPage> {
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                     itemCount: _jobs.length + 1,
                     itemBuilder: (_, i) {
-                      // bottom loader
                       if (i == _jobs.length) {
                         if (!_hasMore) return const SizedBox(height: 30);
 
