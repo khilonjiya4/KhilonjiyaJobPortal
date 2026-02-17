@@ -1,6 +1,10 @@
 // File: lib/presentation/profile/profile_edit_page.dart
 
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../core/ui/khilonjiya_ui.dart';
 import '../../services/job_seeker_home_service.dart';
@@ -36,14 +40,11 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   // Dropdown / Select values
   // ------------------------------------------------------------
 
-  // district dropdown (from master)
   List<String> _districtOptions = [];
   String _selectedDistrict = '';
 
-  // state (fixed)
   String _selectedState = 'Assam';
 
-  // education dropdown
   final List<String> _educationOptions = const [
     'No education',
     'Below 10th',
@@ -65,7 +66,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   ];
   String _selectedEducation = '';
 
-  // job type (schema: preferred_job_types array)
   final List<String> _jobTypeOptions = const [
     'Any',
     'Full-time',
@@ -76,10 +76,8 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   ];
   String _jobType = 'Any';
 
-  // preferred locations (district list)
   final List<String> _preferredDistricts = [];
 
-  // open to work
   bool _openToWork = false;
 
   // ------------------------------------------------------------
@@ -88,7 +86,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   final _skillsCtrl = TextEditingController();
   final List<String> _skills = [];
 
-  // quick suggestions (you can later load from skills_master)
   final List<String> _skillSuggestions = const [
     'Sales',
     'Marketing',
@@ -117,10 +114,23 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   ];
 
   // ------------------------------------------------------------
-  // Optional files (UI only)
+  // Upload state (Resume + Photo)
   // ------------------------------------------------------------
+
   String _resumeName = '';
   String _photoName = '';
+
+  String _resumeStoragePath = '';
+  String _photoStoragePath = '';
+
+  Uint8List? _pickedResumeBytes;
+  String _pickedResumeExt = '';
+
+  Uint8List? _pickedPhotoBytes;
+  String _pickedPhotoExt = '';
+
+  bool _uploadingResume = false;
+  bool _uploadingPhoto = false;
 
   @override
   void initState() {
@@ -168,7 +178,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
       // 2) profile
       _profile = await _service.fetchMyProfile();
 
-      // text fields
       _fullNameCtrl.text = (_profile['full_name'] ?? '').toString();
       _phoneCtrl.text = (_profile['mobile_number'] ?? _profile['phone'] ?? '')
           .toString();
@@ -183,7 +192,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
       _noticeDaysCtrl.text =
           (_profile['notice_period_days'] ?? '').toString();
 
-      // open to work
       _openToWork = (_profile['is_open_to_work'] ?? false) == true;
 
       // education
@@ -232,7 +240,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
         }
       }
 
-      // resume (existing)
+      // resume + avatar (service returns signed url for UI)
       final resumeUrl = (_profile['resume_url'] ?? '').toString().trim();
       if (resumeUrl.isNotEmpty) {
         _resumeName = "Resume uploaded";
@@ -242,12 +250,156 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
       if (avatar.isNotEmpty) {
         _photoName = "Photo uploaded";
       }
+
+      // IMPORTANT:
+      // We must also keep storage paths to save later.
+      // fetchMyProfile returns signed URLs, not paths.
+      // So we load raw path from DB separately.
+      try {
+        final raw = await _service.fetchMyProfileRawPaths();
+        _resumeStoragePath = (raw['resume_url'] ?? '').toString().trim();
+        _photoStoragePath = (raw['avatar_url'] ?? '').toString().trim();
+      } catch (_) {}
     } catch (_) {
       _profile = {};
     }
 
     if (_disposed) return;
     setState(() => _loading = false);
+  }
+
+  // ============================================================
+  // PICKERS
+  // ============================================================
+
+  Future<void> _pickResume() async {
+    if (_uploadingResume || _saving) return;
+
+    try {
+      final res = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['pdf', 'doc', 'docx'],
+        withData: true,
+      );
+
+      if (res == null) return;
+      if (res.files.isEmpty) return;
+
+      final f = res.files.first;
+      final bytes = f.bytes;
+      if (bytes == null || bytes.isEmpty) {
+        _toast("Failed to read resume file");
+        return;
+      }
+
+      final name = (f.name).trim();
+      final ext = (f.extension ?? '').trim();
+
+      if (ext.isEmpty) {
+        _toast("Resume file type not supported");
+        return;
+      }
+
+      setState(() {
+        _pickedResumeBytes = bytes;
+        _pickedResumeExt = ext;
+        _resumeName = name.isEmpty ? "Selected resume" : name;
+      });
+    } catch (_) {
+      _toast("Resume selection failed");
+    }
+  }
+
+  Future<void> _pickPhoto() async {
+    if (_uploadingPhoto || _saving) return;
+
+    try {
+      final picker = ImagePicker();
+      final img = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 80,
+      );
+
+      if (img == null) return;
+
+      final bytes = await img.readAsBytes();
+      if (bytes.isEmpty) {
+        _toast("Failed to read image");
+        return;
+      }
+
+      final name = img.name.trim();
+      final ext = name.contains('.') ? name.split('.').last : '';
+
+      if (ext.isEmpty) {
+        _toast("Photo file type not supported");
+        return;
+      }
+
+      setState(() {
+        _pickedPhotoBytes = bytes;
+        _pickedPhotoExt = ext;
+        _photoName = name.isEmpty ? "Selected photo" : name;
+      });
+    } catch (_) {
+      _toast("Photo selection failed");
+    }
+  }
+
+  // ============================================================
+  // UPLOADS
+  // ============================================================
+
+  Future<void> _uploadResumeIfNeeded() async {
+    if (_pickedResumeBytes == null) return;
+
+    setState(() => _uploadingResume = true);
+
+    try {
+      final path = await _service.uploadMyResume(
+        bytes: _pickedResumeBytes!,
+        fileExtension: _pickedResumeExt,
+      );
+
+      _resumeStoragePath = path;
+
+      // clear picked bytes after upload
+      _pickedResumeBytes = null;
+      _pickedResumeExt = '';
+
+      _toast("Resume uploaded");
+    } catch (_) {
+      _toast("Resume upload failed");
+    }
+
+    if (!mounted) return;
+    setState(() => _uploadingResume = false);
+  }
+
+  Future<void> _uploadPhotoIfNeeded() async {
+    if (_pickedPhotoBytes == null) return;
+
+    setState(() => _uploadingPhoto = true);
+
+    try {
+      final path = await _service.uploadMyProfilePhoto(
+        bytes: _pickedPhotoBytes!,
+        fileExtension: _pickedPhotoExt,
+      );
+
+      _photoStoragePath = path;
+
+      // clear picked bytes after upload
+      _pickedPhotoBytes = null;
+      _pickedPhotoExt = '';
+
+      _toast("Photo uploaded");
+    } catch (_) {
+      _toast("Photo upload failed");
+    }
+
+    if (!mounted) return;
+    setState(() => _uploadingPhoto = false);
   }
 
   // ============================================================
@@ -261,34 +413,36 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
 
     setState(() => _saving = true);
 
+    // 1) Upload files first
+    await _uploadPhotoIfNeeded();
+    await _uploadResumeIfNeeded();
+
+    // 2) Save profile
     final payload = <String, dynamic>{
-      // profile
       'full_name': _fullNameCtrl.text.trim(),
       'phone': _phoneCtrl.text.trim(),
       'bio': _bioCtrl.text.trim(),
 
-      // location
       'current_city': _selectedDistrict.trim(),
       'current_state': _selectedState.trim(),
       'location_text': '',
 
-      // education / career
       'highest_education': _selectedEducation.trim(),
       'total_experience_years': _toInt(_experienceYearsCtrl.text),
 
-      // salary
       'expected_salary_min': _toInt(_expectedSalaryMinCtrl.text),
       'notice_period_days': _toInt(_noticeDaysCtrl.text),
 
-      // preferences
       'preferred_job_type': _jobType,
       'preferred_locations': _preferredDistricts,
 
-      // open to work
       'is_open_to_work': _openToWork,
 
-      // skills
       'skills': _skills,
+
+      // IMPORTANT: save storage path, not signed url
+      if (_photoStoragePath.trim().isNotEmpty) 'avatar_url': _photoStoragePath,
+      if (_resumeStoragePath.trim().isNotEmpty) 'resume_url': _resumeStoragePath,
     };
 
     try {
@@ -314,6 +468,13 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   // ============================================================
   // UI HELPERS
   // ============================================================
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg)),
+    );
+  }
 
   InputDecoration _dec(String hint, {IconData? icon}) {
     return InputDecoration(
@@ -522,7 +683,8 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
             spacing: 10,
             runSpacing: 10,
             children: _skillSuggestions.map((s) {
-              final exists = _skills.any((e) => e.toLowerCase() == s.toLowerCase());
+              final exists =
+                  _skills.any((e) => e.toLowerCase() == s.toLowerCase());
               return InkWell(
                 onTap: exists
                     ? null
@@ -532,7 +694,8 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                       },
                 borderRadius: BorderRadius.circular(999),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
                     color: exists ? const Color(0xFFE2E8F0) : Colors.white,
                     borderRadius: BorderRadius.circular(999),
@@ -543,7 +706,9 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                     style: KhilonjiyaUI.body.copyWith(
                       fontWeight: FontWeight.w800,
                       fontSize: 12.2,
-                      color: exists ? const Color(0xFF64748B) : const Color(0xFF0F172A),
+                      color: exists
+                          ? const Color(0xFF64748B)
+                          : const Color(0xFF0F172A),
                     ),
                   ),
                 ),
@@ -568,7 +733,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
         children: [
           Text("Preferred districts", style: KhilonjiyaUI.caption),
           const SizedBox(height: 10),
-
           if (_preferredDistricts.isNotEmpty) ...[
             Wrap(
               spacing: 10,
@@ -582,7 +746,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
             ),
             const SizedBox(height: 12),
           ],
-
           _dropdownBox(
             value: '',
             options: _districtOptions,
@@ -601,6 +764,14 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
   }
 
   Widget _filePickers() {
+    final resumeText = _uploadingResume
+        ? "Uploading..."
+        : (_resumeName.isEmpty ? "No file selected" : _resumeName);
+
+    final photoText = _uploadingPhoto
+        ? "Uploading..."
+        : (_photoName.isEmpty ? "No photo selected" : _photoName);
+
     return Column(
       children: [
         Container(
@@ -616,29 +787,29 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: KhilonjiyaUI.border),
                 ),
-                child: const Icon(Icons.description_outlined,
-                    color: KhilonjiyaUI.primary),
+                child: const Icon(
+                  Icons.description_outlined,
+                  color: KhilonjiyaUI.primary,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text("Resume (optional)", style: KhilonjiyaUI.body.copyWith(fontWeight: FontWeight.w900)),
-                    const SizedBox(height: 2),
                     Text(
-                      _resumeName.isEmpty ? "No file selected" : _resumeName,
-                      style: KhilonjiyaUI.sub,
+                      "Resume (optional)",
+                      style: KhilonjiyaUI.body
+                          .copyWith(fontWeight: FontWeight.w900),
                     ),
+                    const SizedBox(height: 2),
+                    Text(resumeText, style: KhilonjiyaUI.sub),
                   ],
                 ),
               ),
               const SizedBox(width: 10),
               TextButton(
-                onPressed: () {
-                  // UI only for now
-                  setState(() => _resumeName = "Selected resume");
-                },
+                onPressed: _uploadingResume ? null : _pickResume,
                 child: const Text("Pick"),
               ),
             ],
@@ -658,29 +829,29 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: KhilonjiyaUI.border),
                 ),
-                child: const Icon(Icons.photo_camera_outlined,
-                    color: KhilonjiyaUI.primary),
+                child: const Icon(
+                  Icons.photo_camera_outlined,
+                  color: KhilonjiyaUI.primary,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text("Profile photo (optional)", style: KhilonjiyaUI.body.copyWith(fontWeight: FontWeight.w900)),
-                    const SizedBox(height: 2),
                     Text(
-                      _photoName.isEmpty ? "No photo selected" : _photoName,
-                      style: KhilonjiyaUI.sub,
+                      "Profile photo (optional)",
+                      style: KhilonjiyaUI.body
+                          .copyWith(fontWeight: FontWeight.w900),
                     ),
+                    const SizedBox(height: 2),
+                    Text(photoText, style: KhilonjiyaUI.sub),
                   ],
                 ),
               ),
               const SizedBox(width: 10),
               TextButton(
-                onPressed: () {
-                  // UI only for now
-                  setState(() => _photoName = "Selected photo");
-                },
+                onPressed: _uploadingPhoto ? null : _pickPhoto,
                 child: const Text("Pick"),
               ),
             ],
@@ -698,7 +869,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // header card
           Container(
             decoration: KhilonjiyaUI.cardDecoration(radius: 22),
             padding: const EdgeInsets.all(16),
@@ -724,7 +894,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                       Text("Edit your profile", style: KhilonjiyaUI.hTitle),
                       const SizedBox(height: 4),
                       Text(
-                        "Fill only what you want. More details = better matches.",
+                        "More details = better matches.",
                         style: KhilonjiyaUI.sub,
                       ),
                     ],
@@ -734,7 +904,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
             ),
           ),
 
-          // ------------------------------------------------------
           _sectionTitle("Mobile number", sub: "This is used for job applications."),
           TextField(
             controller: _phoneCtrl,
@@ -745,7 +914,7 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
           _sectionTitle("Basic details"),
           TextField(
             controller: _fullNameCtrl,
-            decoration: _dec("Full name (optional)", icon: Icons.badge_outlined),
+            decoration: _dec("Full name", icon: Icons.badge_outlined),
           ),
 
           _sectionTitle("Location", sub: "Choose your district for nearby jobs."),
@@ -759,7 +928,10 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
             ),
           ] else ...[
             TextField(
-              decoration: _dec("District (optional)", icon: Icons.location_on_outlined),
+              decoration: _dec(
+                "District",
+                icon: Icons.location_on_outlined,
+              ),
               onChanged: (v) => _selectedDistrict = v.trim(),
             ),
           ],
@@ -785,19 +957,26 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
           TextField(
             controller: _experienceYearsCtrl,
             keyboardType: TextInputType.number,
-            decoration: _dec("Total experience (years)", icon: Icons.work_outline),
+            decoration:
+                _dec("Total experience (years)", icon: Icons.work_outline),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _expectedSalaryMinCtrl,
             keyboardType: TextInputType.number,
-            decoration: _dec("Expected salary per month", icon: Icons.currency_rupee_rounded),
+            decoration: _dec(
+              "Expected salary per month",
+              icon: Icons.currency_rupee_rounded,
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _noticeDaysCtrl,
             keyboardType: TextInputType.number,
-            decoration: _dec("Notice period (days)", icon: Icons.calendar_today_outlined),
+            decoration: _dec(
+              "Notice period (days)",
+              icon: Icons.calendar_today_outlined,
+            ),
           ),
 
           _sectionTitle("Preferences"),
@@ -813,10 +992,17 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
             value: _openToWork,
             onChanged: (v) => setState(() => _openToWork = v),
             contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
             tileColor: const Color(0xFFF8FAFC),
-            title: Text("Open to work", style: KhilonjiyaUI.body.copyWith(fontWeight: FontWeight.w900)),
-            subtitle: Text("Employers can see you as available.", style: KhilonjiyaUI.sub),
+            title: Text(
+              "Open to work",
+              style: KhilonjiyaUI.body.copyWith(fontWeight: FontWeight.w900),
+            ),
+            subtitle: Text(
+              "Employers can see you as available.",
+              style: KhilonjiyaUI.sub,
+            ),
           ),
 
           _sectionTitle("Preferred locations", sub: "Optional. Helps recommendations."),
@@ -832,7 +1018,10 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
           TextField(
             controller: _bioCtrl,
             maxLines: 5,
-            decoration: _dec("Short bio (optional)", icon: Icons.subject_rounded),
+            decoration: _dec(
+              "Short bio",
+              icon: Icons.subject_rounded,
+            ),
           ),
 
           const SizedBox(height: 14),
@@ -840,6 +1029,10 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
       ),
     );
   }
+
+  // ============================================================
+  // BUILD
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
@@ -849,7 +1042,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
       body: SafeArea(
         child: Column(
           children: [
-            // top bar
             Container(
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
               decoration: BoxDecoration(
@@ -874,7 +1066,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
                 ],
               ),
             ),
-
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
@@ -883,8 +1074,6 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
           ],
         ),
       ),
-
-      // bottom button
       bottomNavigationBar: Container(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
         decoration: BoxDecoration(
@@ -897,7 +1086,8 @@ class _ProfileEditPageState extends State<ProfileEditPage> {
             width: double.infinity,
             height: 46,
             child: ElevatedButton(
-              onPressed: _saving ? null : _save,
+              onPressed:
+                  (_saving || _uploadingPhoto || _uploadingResume) ? null : _save,
               style: ElevatedButton.styleFrom(
                 backgroundColor: KhilonjiyaUI.primary,
                 foregroundColor: Colors.white,
