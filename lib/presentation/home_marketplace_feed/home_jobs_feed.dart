@@ -161,9 +161,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   Future<void> _loadInitialData() async {
     if (_isDisposed) return;
 
-    if (!_isDisposed) {
-      setState(() => _isCheckingAuth = false);
-    }
+    setState(() => _isCheckingAuth = false);
 
     try {
       // 1) Home summary
@@ -475,7 +473,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
           ),
           const SizedBox(width: 8),
 
-          // Notifications
           InkWell(
             onTap: () {},
             borderRadius: BorderRadius.circular(999),
@@ -555,8 +552,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
             jobsPostedToday: _jobsPostedToday,
             onProfileTap: _openProfileEditPage,
             onMissingDetailsTap: _openProfileEditPage,
-
-            // ✅ FIXED
             onProfileViewAllTap: _openProfileEditPage,
             onJobsPostedTodayViewAllTap: _openJobsPostedTodayPage,
           ),
@@ -577,16 +572,12 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
           ),
           const SizedBox(height: 14),
 
+          // ✅ FIXED: ExpectedSalaryCard only supports onTap
           ExpectedSalaryCard(
-            expectedSalaryPerMonth: _expectedSalaryPerMonth,
-            onTap: _openExpectedSalaryEditPage,
-            onIconTap: _openJobsBySalary,
+            onTap: _openJobsBySalary,
           ),
           const SizedBox(height: 18),
 
-          // ============================================================
-          // RECOMMENDED
-          // ============================================================
           SectionHeader(
             title: "Recommended jobs",
             ctaText: "View all",
@@ -612,9 +603,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
           const SizedBox(height: 18),
 
-          // ============================================================
-          // LATEST
-          // ============================================================
           SectionHeader(
             title: "Latest jobs",
             ctaText: "View all",
@@ -640,9 +628,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
           const SizedBox(height: 18),
 
-          // ============================================================
-          // NEARBY
-          // ============================================================
           SectionHeader(
             title: "Jobs nearby",
             ctaText: "View all",
@@ -668,9 +653,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
           const SizedBox(height: 18),
 
-          // ============================================================
-          // TOP COMPANIES
-          // ============================================================
           SectionHeader(
             title: "Top companies",
             ctaText: "View all",
