@@ -16,51 +16,135 @@ class SavedJobsPage extends StatefulWidget {
 class _SavedJobsPageState extends State<SavedJobsPage> {
   final JobSeekerHomeService _homeService = JobSeekerHomeService();
 
-  List<Map<String, dynamic>> _jobs = [];
   bool _loading = true;
+  bool _loadingMore = false;
   bool _disposed = false;
+
+  bool _hasMore = true;
+  int _offset = 0;
+
+  static const int _pageSize = 20;
+
+  final ScrollController _scrollController = ScrollController();
+
+  List<Map<String, dynamic>> _jobs = [];
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _scrollController.addListener(_onScroll);
+    _loadFirstPage();
   }
 
   @override
   void dispose() {
     _disposed = true;
+    _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    if (!_disposed) setState(() => _loading = true);
+  void _onScroll() {
+    if (_loading || _loadingMore || !_hasMore) return;
+    if (!_scrollController.hasClients) return;
+
+    final pos = _scrollController.position;
+
+    if (pos.pixels >= pos.maxScrollExtent - 250) {
+      _loadMore();
+    }
+  }
+
+  // ============================================================
+  // LOAD: FIRST PAGE
+  // ============================================================
+  Future<void> _loadFirstPage() async {
+    if (_disposed) return;
+
+    setState(() {
+      _loading = true;
+      _loadingMore = false;
+      _jobs = [];
+      _hasMore = true;
+      _offset = 0;
+    });
 
     try {
-      _jobs = await _homeService.getSavedJobs();
+      final first = await _homeService.getSavedJobs(
+        offset: 0,
+        limit: _pageSize,
+      );
+
+      _jobs = first;
+      _offset = _jobs.length;
+      _hasMore = first.length >= _pageSize;
     } catch (_) {
       _jobs = [];
+      _hasMore = false;
     }
 
     if (_disposed) return;
     setState(() => _loading = false);
   }
 
-  Future<void> _toggleSaveJob(String jobId) async {
+  // ============================================================
+  // LOAD: MORE
+  // ============================================================
+  Future<void> _loadMore() async {
+    if (_loadingMore || !_hasMore) return;
+
+    setState(() => _loadingMore = true);
+
+    try {
+      final more = await _homeService.getSavedJobs(
+        offset: _offset,
+        limit: _pageSize,
+      );
+
+      if (more.isEmpty) {
+        _hasMore = false;
+      } else {
+        _jobs.addAll(more);
+        _offset = _jobs.length;
+
+        if (more.length < _pageSize) {
+          _hasMore = false;
+        }
+      }
+    } catch (_) {
+      _hasMore = false;
+    }
+
+    if (_disposed) return;
+    setState(() => _loadingMore = false);
+  }
+
+  // ============================================================
+  // UNSAVE (remove immediately from list)
+  // ============================================================
+  Future<void> _unsaveJob(String jobId) async {
     try {
       await _homeService.toggleSaveJob(jobId);
-      await _load(); // refresh list after unsave
+
+      if (_disposed) return;
+
+      setState(() {
+        _jobs.removeWhere((j) => j['id']?.toString() == jobId);
+      });
     } catch (_) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Failed to update saved job")),
       );
     }
   }
 
+  // ============================================================
+  // OPEN DETAILS
+  // ============================================================
   Future<void> _openJobDetails(Map<String, dynamic> job) async {
     final jobId = job['id']?.toString() ?? '';
     if (jobId.trim().isEmpty) return;
 
-    // track view (fire and forget)
     _homeService.trackJobView(jobId);
 
     await Navigator.push(
@@ -69,15 +153,19 @@ class _SavedJobsPageState extends State<SavedJobsPage> {
         builder: (_) => JobDetailsPage(
           job: job,
           isSaved: true,
-          onSaveToggle: () => _toggleSaveJob(jobId),
+          onSaveToggle: () => _unsaveJob(jobId),
         ),
       ),
     );
 
-    // refresh saved list when coming back
-    await _load();
+    // when coming back, just refresh first page
+    // (because job might be unsaved from details)
+    await _loadFirstPage();
   }
 
+  // ============================================================
+  // UI
+  // ============================================================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -107,6 +195,10 @@ class _SavedJobsPageState extends State<SavedJobsPage> {
                       style: KhilonjiyaUI.hTitle,
                     ),
                   ),
+                  IconButton(
+                    onPressed: _loading ? null : _loadFirstPage,
+                    icon: const Icon(Icons.refresh_rounded),
+                  ),
                 ],
               ),
             ),
@@ -115,7 +207,7 @@ class _SavedJobsPageState extends State<SavedJobsPage> {
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : RefreshIndicator(
-                      onRefresh: _load,
+                      onRefresh: _loadFirstPage,
                       child: _jobs.isEmpty
                           ? ListView(
                               padding: const EdgeInsets.all(16),
@@ -144,10 +236,31 @@ class _SavedJobsPageState extends State<SavedJobsPage> {
                               ],
                             )
                           : ListView.builder(
+                              controller: _scrollController,
                               padding:
-                                  const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                              itemCount: _jobs.length,
+                                  const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                              itemCount: _jobs.length + 1,
                               itemBuilder: (_, i) {
+                                // bottom loader
+                                if (i == _jobs.length) {
+                                  if (!_hasMore) {
+                                    return const SizedBox(height: 30);
+                                  }
+
+                                  return Padding(
+                                    padding: const EdgeInsets.only(top: 10),
+                                    child: Center(
+                                      child: _loadingMore
+                                          ? const Padding(
+                                              padding: EdgeInsets.all(12),
+                                              child:
+                                                  CircularProgressIndicator(),
+                                            )
+                                          : const SizedBox(height: 10),
+                                    ),
+                                  );
+                                }
+
                                 final job = _jobs[i];
                                 final jobId = job['id']?.toString() ?? '';
 
@@ -156,7 +269,7 @@ class _SavedJobsPageState extends State<SavedJobsPage> {
                                   child: JobCardWidget(
                                     job: job,
                                     isSaved: true,
-                                    onSaveToggle: () => _toggleSaveJob(jobId),
+                                    onSaveToggle: () => _unsaveJob(jobId),
                                     onTap: () => _openJobDetails(job),
                                   ),
                                 );
