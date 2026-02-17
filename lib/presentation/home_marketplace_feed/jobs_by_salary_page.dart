@@ -7,8 +7,8 @@ import '../common/widgets/cards/job_card_widget.dart';
 import '../common/widgets/pages/job_details_page.dart';
 
 class JobsBySalaryPage extends StatefulWidget {
-  /// If provided, page will show jobs with salary >= this value
-  /// Otherwise it will auto-load from user_profiles.expected_salary_min
+  /// Optional: if passed, page will auto-run once using this salary
+  /// BUT we still will not save anything to DB.
   final int? minMonthlySalary;
 
   const JobsBySalaryPage({
@@ -23,11 +23,9 @@ class JobsBySalaryPage extends StatefulWidget {
 class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
   final JobSeekerHomeService _homeService = JobSeekerHomeService();
 
-  bool _loading = true;
+  bool _loading = false;
   bool _loadingMore = false;
   bool _disposed = false;
-
-  int _expectedSalary = 0;
 
   bool _hasMore = true;
   int _offset = 0;
@@ -39,17 +37,32 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
   List<Map<String, dynamic>> _jobs = [];
   Set<String> _savedJobIds = {};
 
+  // salary input (always blank initially)
+  final TextEditingController _salaryCtrl = TextEditingController();
+
+  // current active salary filter
+  int _activeSalary = 0;
+
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
-    _loadFirstPage();
+
+    // If passed from previous screen, auto-run once
+    if (widget.minMonthlySalary != null && widget.minMonthlySalary! > 0) {
+      _activeSalary = widget.minMonthlySalary!;
+      _salaryCtrl.text = _activeSalary.toString();
+      _loadFirstPage();
+    } else {
+      _loadSavedJobsOnly();
+    }
   }
 
   @override
   void dispose() {
     _disposed = true;
     _scrollController.dispose();
+    _salaryCtrl.dispose();
     super.dispose();
   }
 
@@ -64,94 +77,125 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
     }
   }
 
-  // ------------------------------------------------------------
-  // LOAD: FIRST PAGE
-  // ------------------------------------------------------------
-  Future<void> _loadFirstPage() async {
-    if (!_disposed) {
-      setState(() {
-        _loading = true;
-        _loadingMore = false;
-        _jobs = [];
-        _hasMore = true;
-        _offset = 0;
-      });
-    }
+  int _parseSalary(String raw) {
+    final clean = raw.trim().replaceAll(',', '');
+    if (clean.isEmpty) return 0;
+    return int.tryParse(clean) ?? 0;
+  }
 
-    // 1) saved jobs
+  Future<void> _loadSavedJobsOnly() async {
     try {
       _savedJobIds = await _homeService.getUserSavedJobs();
     } catch (_) {
       _savedJobIds = {};
     }
 
-    // 2) salary source:
-    //    - if passed from Home -> use it
-    //    - else load from profile
-    if (widget.minMonthlySalary != null && widget.minMonthlySalary! > 0) {
-      _expectedSalary = widget.minMonthlySalary!;
-    } else {
-      try {
-        _expectedSalary = await _homeService.getExpectedSalaryPerMonth();
-      } catch (_) {
-        _expectedSalary = 0;
-      }
-    }
+    if (_disposed) return;
+    setState(() {});
+  }
 
-    // 3) if salary not set -> no jobs
-    if (_expectedSalary <= 0) {
-      _jobs = [];
-      if (!_disposed) setState(() => _loading = false);
+  // ------------------------------------------------------------
+  // APPLY FILTER (user clicks button)
+  // ------------------------------------------------------------
+  Future<void> _applySalaryFilter() async {
+    final v = _parseSalary(_salaryCtrl.text);
+
+    if (v <= 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Enter a valid salary amount")),
+      );
       return;
     }
 
-    // 4) fetch jobs (first page)
+    _activeSalary = v;
+    await _loadFirstPage();
+  }
+
+  // ------------------------------------------------------------
+  // LOAD FIRST PAGE
+  // ------------------------------------------------------------
+  Future<void> _loadFirstPage() async {
+    if (_activeSalary <= 0) return;
+
+    if (_disposed) return;
+
+    setState(() {
+      _loading = true;
+      _loadingMore = false;
+      _jobs = [];
+      _hasMore = true;
+      _offset = 0;
+    });
+
+    // saved jobs
+    try {
+      _savedJobIds = await _homeService.getUserSavedJobs();
+    } catch (_) {
+      _savedJobIds = {};
+    }
+
+    // first page
     try {
       final first = await _homeService.fetchJobsByMinSalaryMonthly(
-        minMonthlySalary: _expectedSalary,
+        minMonthlySalary: _activeSalary,
         offset: 0,
         limit: _pageSize,
       );
 
-      _jobs = first;
-      _offset = _jobs.length;
-      _hasMore = first.length >= _pageSize;
-    } catch (_) {
-      _jobs = [];
-      _hasMore = false;
-    }
+      if (_disposed) return;
 
-    if (_disposed) return;
-    setState(() => _loading = false);
+      setState(() {
+        _jobs = first;
+        _offset = _jobs.length;
+        _hasMore = first.length >= _pageSize;
+        _loading = false;
+      });
+    } catch (_) {
+      if (_disposed) return;
+
+      setState(() {
+        _jobs = [];
+        _hasMore = false;
+        _loading = false;
+      });
+    }
   }
 
   // ------------------------------------------------------------
-  // LOAD: MORE
+  // LOAD MORE
   // ------------------------------------------------------------
   Future<void> _loadMore() async {
+    if (_activeSalary <= 0) return;
     if (_loadingMore || !_hasMore) return;
+    if (_disposed) return;
 
     setState(() => _loadingMore = true);
 
     try {
       final more = await _homeService.fetchJobsByMinSalaryMonthly(
-        minMonthlySalary: _expectedSalary,
+        minMonthlySalary: _activeSalary,
         offset: _offset,
         limit: _pageSize,
       );
 
-      if (more.isEmpty) {
-        _hasMore = false;
-      } else {
-        _jobs.addAll(more);
-        _offset = _jobs.length;
+      if (_disposed) return;
 
-        if (more.length < _pageSize) {
+      setState(() {
+        if (more.isEmpty) {
           _hasMore = false;
+        } else {
+          _jobs.addAll(more);
+          _offset = _jobs.length;
+
+          if (more.length < _pageSize) {
+            _hasMore = false;
+          }
         }
-      }
+      });
     } catch (_) {
-      _hasMore = false;
+      if (_disposed) return;
+      setState(() => _hasMore = false);
     }
 
     if (_disposed) return;
@@ -169,12 +213,7 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
       setState(() {
         isSaved ? _savedJobIds.add(jobId) : _savedJobIds.remove(jobId);
       });
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Failed to update saved job")),
-      );
-    }
+    } catch (_) {}
   }
 
   // ------------------------------------------------------------
@@ -197,7 +236,6 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
       ),
     );
 
-    // refresh saved state after coming back
     try {
       _savedJobIds = await _homeService.getUserSavedJobs();
     } catch (_) {}
@@ -207,210 +245,66 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
   }
 
   // ------------------------------------------------------------
-  // EDIT SALARY (updates profile + refresh)
+  // UI
   // ------------------------------------------------------------
-  int _parseSalary(String raw) {
-    final clean = raw.trim().replaceAll(',', '');
-    if (clean.isEmpty) return 0;
-    return int.tryParse(clean) ?? 0;
-  }
-
-  Future<void> _editExpectedSalary() async {
-    final ctrl = TextEditingController(
-      text: _expectedSalary <= 0 ? '' : _expectedSalary.toString(),
-    );
-
-    final res = await showModalBottomSheet<int>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-          ),
-          child: Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        "Expected salary (per month)",
-                        style: KhilonjiyaUI.hTitle,
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  "We will show jobs with salary equal to or higher than this.",
-                  style: KhilonjiyaUI.sub,
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: ctrl,
-                  keyboardType: TextInputType.number,
-                  style: KhilonjiyaUI.body.copyWith(fontWeight: FontWeight.w900),
-                  decoration: InputDecoration(
-                    hintText: "Example: 15000",
-                    hintStyle: KhilonjiyaUI.sub,
-                    prefixIcon: const Icon(Icons.currency_rupee_rounded),
-                    filled: true,
-                    fillColor: const Color(0xFFF8FAFC),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(18),
-                      borderSide: BorderSide(color: KhilonjiyaUI.border),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(18),
-                      borderSide: BorderSide(color: KhilonjiyaUI.border),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(18),
-                      borderSide: BorderSide(
-                        color: KhilonjiyaUI.primary.withOpacity(0.6),
-                        width: 1.4,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                SizedBox(
-                  width: double.infinity,
-                  height: 44,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      final v = _parseSalary(ctrl.text);
-                      Navigator.pop(context, v);
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: KhilonjiyaUI.primary,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                    ),
-                    child: const Text(
-                      "Save & Refresh Jobs",
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-
-    if (res == null) return;
-
-    final clean = res < 0 ? 0 : res;
-
-    if (clean <= 0) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Enter a valid salary amount")),
-      );
-      return;
-    }
-
-    try {
-      await _homeService.updateExpectedSalaryPerMonth(clean);
-
-      if (_disposed) return;
-
-      setState(() => _expectedSalary = clean);
-      await _loadFirstPage();
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Failed to update expected salary")),
-      );
-    }
-  }
-
-  // ------------------------------------------------------------
-  // UI HELPERS
-  // ------------------------------------------------------------
-  String _salaryText(int v) {
-    if (v <= 0) return "Not set";
-    if (v >= 100000) return "₹${(v / 100000).toStringAsFixed(1)}L / month";
-    if (v >= 1000) return "₹${(v / 1000).toStringAsFixed(0)}k / month";
-    return "₹$v / month";
-  }
-
-  Widget _headerCard() {
+  Widget _salaryInputCard() {
     return Container(
       decoration: KhilonjiyaUI.cardDecoration(radius: 22),
       padding: const EdgeInsets.all(16),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              color: KhilonjiyaUI.primary.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Icon(
-              Icons.currency_rupee_rounded,
-              color: KhilonjiyaUI.primary,
-            ),
+          Text("Filter by salary", style: KhilonjiyaUI.hTitle),
+          const SizedBox(height: 6),
+          Text(
+            "Enter expected monthly salary. We will show jobs with salary ≥ this amount.",
+            style: KhilonjiyaUI.sub,
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("Your expected salary", style: KhilonjiyaUI.caption),
-                const SizedBox(height: 4),
-                Text(
-                  _salaryText(_expectedSalary),
-                  style: KhilonjiyaUI.body.copyWith(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 15.5,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  "Showing jobs with salary ≥ this amount",
-                  style: KhilonjiyaUI.sub,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          InkWell(
-            onTap: _editExpectedSalary,
-            borderRadius: BorderRadius.circular(999),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: KhilonjiyaUI.border),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _salaryCtrl,
+            keyboardType: TextInputType.number,
+            style: KhilonjiyaUI.body.copyWith(fontWeight: FontWeight.w900),
+            decoration: InputDecoration(
+              hintText: "Example: 15000",
+              hintStyle: KhilonjiyaUI.sub,
+              prefixIcon: const Icon(Icons.currency_rupee_rounded),
+              filled: true,
+              fillColor: const Color(0xFFF8FAFC),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide(color: KhilonjiyaUI.border),
               ),
-              child: Text(
-                "Edit",
-                style: KhilonjiyaUI.body.copyWith(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 13,
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide(color: KhilonjiyaUI.border),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide(
+                  color: KhilonjiyaUI.primary.withOpacity(0.6),
+                  width: 1.4,
                 ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: ElevatedButton(
+              onPressed: _loading ? null : _applySalaryFilter,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: KhilonjiyaUI.primary,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+              ),
+              child: const Text(
+                "Show Jobs",
+                style: TextStyle(fontWeight: FontWeight.w900),
               ),
             ),
           ),
@@ -423,7 +317,7 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 30),
       children: [
-        _headerCard(),
+        _salaryInputCard(),
         const SizedBox(height: 14),
         Container(
           decoration: KhilonjiyaUI.cardDecoration(radius: 22),
@@ -437,39 +331,19 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
               ),
               const SizedBox(height: 12),
               Text(
-                _expectedSalary <= 0
-                    ? "Set your expected salary"
+                _activeSalary <= 0
+                    ? "Enter salary to see jobs"
                     : "No matching jobs found",
                 style: KhilonjiyaUI.hTitle,
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 6),
               Text(
-                _expectedSalary <= 0
-                    ? "Add expected salary to see jobs with salary equal or higher."
-                    : "Try lowering expected salary or check later.",
+                _activeSalary <= 0
+                    ? "Add expected salary to fetch matching jobs."
+                    : "Try a lower salary amount.",
                 style: KhilonjiyaUI.sub,
                 textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                height: 44,
-                child: ElevatedButton(
-                  onPressed: _editExpectedSalary,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: KhilonjiyaUI.primary,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                  ),
-                  child: Text(
-                    _expectedSalary <= 0 ? "Set Salary" : "Update Salary",
-                    style: const TextStyle(fontWeight: FontWeight.w900),
-                  ),
-                ),
               ),
             ],
           ),
@@ -490,7 +364,7 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
           if (i == 0) {
             return Column(
               children: [
-                _headerCard(),
+                _salaryInputCard(),
                 const SizedBox(height: 14),
               ],
             );
@@ -560,7 +434,7 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
                     ),
                   ),
                   IconButton(
-                    onPressed: _loadFirstPage,
+                    onPressed: _loading ? null : _loadFirstPage,
                     icon: const Icon(Icons.refresh_rounded),
                   ),
                 ],
