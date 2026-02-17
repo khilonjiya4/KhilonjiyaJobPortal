@@ -83,9 +83,14 @@ class _RecommendedJobsPageState extends State<RecommendedJobsPage> {
         limit: _pageSize,
       );
 
-      _jobs = first;
-      _offset = _jobs.length;
-      _hasMore = first.length >= _pageSize;
+      if (_disposed) return;
+
+      setState(() {
+        _jobs = first;
+        _offset = _jobs.length;
+        _hasMore = first.length >= _pageSize;
+        _loading = false;
+      });
     } catch (_) {
       // fallback to latest jobs
       try {
@@ -94,17 +99,24 @@ class _RecommendedJobsPageState extends State<RecommendedJobsPage> {
           limit: _pageSize,
         );
 
-        _jobs = first;
-        _offset = _jobs.length;
-        _hasMore = first.length >= _pageSize;
+        if (_disposed) return;
+
+        setState(() {
+          _jobs = first;
+          _offset = _jobs.length;
+          _hasMore = first.length >= _pageSize;
+          _loading = false;
+        });
       } catch (_) {
-        _jobs = [];
-        _hasMore = false;
+        if (_disposed) return;
+
+        setState(() {
+          _jobs = [];
+          _hasMore = false;
+          _loading = false;
+        });
       }
     }
-
-    if (_disposed) return;
-    setState(() => _loading = false);
   }
 
   // ------------------------------------------------------------
@@ -112,6 +124,7 @@ class _RecommendedJobsPageState extends State<RecommendedJobsPage> {
   // ------------------------------------------------------------
   Future<void> _loadMore() async {
     if (_loadingMore || !_hasMore) return;
+    if (_disposed) return;
 
     setState(() => _loadingMore = true);
 
@@ -121,24 +134,9 @@ class _RecommendedJobsPageState extends State<RecommendedJobsPage> {
         limit: _pageSize,
       );
 
-      if (more.isEmpty) {
-        _hasMore = false;
-      } else {
-        _jobs.addAll(more);
-        _offset = _jobs.length;
+      if (_disposed) return;
 
-        if (more.length < _pageSize) {
-          _hasMore = false;
-        }
-      }
-    } catch (_) {
-      // fallback pagination
-      try {
-        final more = await _homeService.fetchJobs(
-          offset: _offset,
-          limit: _pageSize,
-        );
-
+      setState(() {
         if (more.isEmpty) {
           _hasMore = false;
         } else {
@@ -149,8 +147,32 @@ class _RecommendedJobsPageState extends State<RecommendedJobsPage> {
             _hasMore = false;
           }
         }
+      });
+    } catch (_) {
+      // fallback pagination
+      try {
+        final more = await _homeService.fetchJobs(
+          offset: _offset,
+          limit: _pageSize,
+        );
+
+        if (_disposed) return;
+
+        setState(() {
+          if (more.isEmpty) {
+            _hasMore = false;
+          } else {
+            _jobs.addAll(more);
+            _offset = _jobs.length;
+
+            if (more.length < _pageSize) {
+              _hasMore = false;
+            }
+          }
+        });
       } catch (_) {
-        _hasMore = false;
+        if (_disposed) return;
+        setState(() => _hasMore = false);
       }
     }
 
