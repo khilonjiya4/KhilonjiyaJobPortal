@@ -1,10 +1,22 @@
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class JobSeekerHomeService {
   final SupabaseClient _db = Supabase.instance.client;
+
+  // ============================================================
+  // STORAGE
+  // ============================================================
+
+  static const String _bucketJobFiles = 'job-files';
+  static const String _folderPhotos = 'photos';
+  static const String _folderResumes = 'resumes';
+
+  // how long signed URLs should live
+  static const int _signedUrlExpirySeconds = 60 * 60; // 1 hour
 
   // ============================================================
   // AUTH GUARD
@@ -51,6 +63,140 @@ class JobSeekerHomeService {
       )
     )
   ''';
+
+  // ============================================================
+  // STORAGE HELPERS
+  // ============================================================
+
+  bool _looksLikeHttpUrl(String s) {
+    final v = s.trim().toLowerCase();
+    return v.startsWith('http://') || v.startsWith('https://');
+  }
+
+  String _cleanFileExt(String? ext) {
+    if (ext == null) return '';
+    final v = ext.trim().toLowerCase().replaceAll('.', '');
+    if (v.isEmpty) return '';
+    if (v.length > 8) return '';
+    return v;
+  }
+
+  String _randomToken() {
+    final r = Random();
+    return "${DateTime.now().millisecondsSinceEpoch}_${r.nextInt(999999)}";
+  }
+
+  /// Convert a stored path like:
+  ///   photos/{userId}/xxx.jpg
+  /// into a signed URL.
+  ///
+  /// If already looks like http URL, returns as-is.
+  Future<String> _toSignedUrlIfNeeded(String raw) async {
+    final v = raw.trim();
+    if (v.isEmpty) return '';
+    if (_looksLikeHttpUrl(v)) return v;
+
+    try {
+      final signed = await _db.storage.from(_bucketJobFiles).createSignedUrl(
+            v,
+            _signedUrlExpirySeconds,
+          );
+      return signed;
+    } catch (_) {
+      // fallback: return original path
+      return v;
+    }
+  }
+
+  // ============================================================
+  // PROFILE FILE UPLOADS
+  // ============================================================
+
+  /// Upload profile photo.
+  ///
+  /// Returns storage path like:
+  ///   photos/{userId}/avatar_...jpg
+  ///
+  /// You should store this path in user_profiles.avatar_url
+  Future<String> uploadMyProfilePhoto({
+    required Uint8List bytes,
+    required String fileExtension,
+  }) async {
+    _ensureAuthenticatedSync();
+    final userId = _userId();
+
+    final ext = _cleanFileExt(fileExtension);
+    if (ext.isEmpty) {
+      throw Exception("Invalid photo file type");
+    }
+
+    final path =
+        '$_folderPhotos/$userId/avatar_${_randomToken()}.$ext';
+
+    await _db.storage.from(_bucketJobFiles).uploadBinary(
+          path,
+          bytes,
+          fileOptions: FileOptions(
+            upsert: true,
+            contentType: _contentTypeFromExt(ext),
+          ),
+        );
+
+    return path;
+  }
+
+  /// Upload resume file.
+  ///
+  /// Returns storage path like:
+  ///   resumes/{userId}/resume_...pdf
+  ///
+  /// You should store this path in user_profiles.resume_url
+  Future<String> uploadMyResume({
+    required Uint8List bytes,
+    required String fileExtension,
+  }) async {
+    _ensureAuthenticatedSync();
+    final userId = _userId();
+
+    final ext = _cleanFileExt(fileExtension);
+    if (ext.isEmpty) {
+      throw Exception("Invalid resume file type");
+    }
+
+    final path =
+        '$_folderResumes/$userId/resume_${_randomToken()}.$ext';
+
+    await _db.storage.from(_bucketJobFiles).uploadBinary(
+          path,
+          bytes,
+          fileOptions: FileOptions(
+            upsert: true,
+            contentType: _contentTypeFromExt(ext),
+          ),
+        );
+
+    return path;
+  }
+
+  String _contentTypeFromExt(String ext) {
+    switch (ext.toLowerCase()) {
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'webp':
+        return 'image/webp';
+      case 'pdf':
+        return 'application/pdf';
+      case 'doc':
+        return 'application/msword';
+      case 'docx':
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      default:
+        return 'application/octet-stream';
+    }
+  }
 
   // ============================================================
   // LOCATION HELPERS (Assam nearby logic)
@@ -200,20 +346,12 @@ class JobSeekerHomeService {
     return List<Map<String, dynamic>>.from(res);
   }
 
-  // ============================================================
-  // LATEST JOBS (PAGINATED)
-  // ============================================================
-
   Future<List<Map<String, dynamic>>> fetchLatestJobs({
     int offset = 0,
     int limit = 20,
   }) async {
     return fetchJobs(offset: offset, limit: limit);
   }
-
-  // ============================================================
-  // JOBS POSTED TODAY (PAGINATED)
-  // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchJobsPostedToday({
     int offset = 0,
@@ -239,10 +377,6 @@ class JobSeekerHomeService {
 
     return List<Map<String, dynamic>>.from(res);
   }
-
-  // ============================================================
-  // JOBS NEARBY (PAGINATED + Assam logic)
-  // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchJobsNearby({
     int offset = 0,
@@ -315,10 +449,6 @@ class JobSeekerHomeService {
     return all.sublist(offset, end);
   }
 
-  // ============================================================
-  // JOBS FILTERED BY SALARY (MONTHLY)
-  // ============================================================
-
   Future<List<Map<String, dynamic>>> fetchJobsByMinSalaryMonthly({
     required int minMonthlySalary,
     int offset = 0,
@@ -357,9 +487,6 @@ class JobSeekerHomeService {
     final userId = _userId();
     final nowIso = DateTime.now().toIso8601String();
 
-    // ------------------------------------------------------------
-    // Load profile data
-    // ------------------------------------------------------------
     List<String> preferredLocations = [];
     String currentCity = '';
     String highestEducation = '';
@@ -397,9 +524,6 @@ class JobSeekerHomeService {
     final cityLower = currentCity.toLowerCase();
     final eduLower = highestEducation.toLowerCase();
 
-    // ------------------------------------------------------------
-    // Collector (dedupe)
-    // ------------------------------------------------------------
     final mixed = <Map<String, dynamic>>[];
     final seen = <String>{};
 
@@ -415,9 +539,6 @@ class JobSeekerHomeService {
       }
     }
 
-    // ------------------------------------------------------------
-    // 1) Nearby districts (Assam only)
-    // ------------------------------------------------------------
     try {
       final inAssam = await isUserInAssam();
       if (inAssam) {
@@ -428,7 +549,6 @@ class JobSeekerHomeService {
             userLng: gps['lng']!,
           );
 
-          // take only top 8 districts for recommended
           final top = districts.take(8).toList();
 
           if (top.isNotEmpty) {
@@ -447,9 +567,6 @@ class JobSeekerHomeService {
       }
     } catch (_) {}
 
-    // ------------------------------------------------------------
-    // 2) Preferred locations
-    // ------------------------------------------------------------
     if (preferredLocations.isNotEmpty) {
       try {
         final res = await _db
@@ -465,9 +582,6 @@ class JobSeekerHomeService {
       } catch (_) {}
     }
 
-    // ------------------------------------------------------------
-    // 3) Current city/district
-    // ------------------------------------------------------------
     if (currentCity.trim().isNotEmpty) {
       try {
         final res = await _db
@@ -483,9 +597,6 @@ class JobSeekerHomeService {
       } catch (_) {}
     }
 
-    // ------------------------------------------------------------
-    // 4) Education match
-    // ------------------------------------------------------------
     if (highestEducation.trim().isNotEmpty) {
       try {
         final res = await _db
@@ -501,9 +612,6 @@ class JobSeekerHomeService {
       } catch (_) {}
     }
 
-    // ------------------------------------------------------------
-    // 5) Expected salary match (ONLY if profile has it)
-    // ------------------------------------------------------------
     if (expectedSalaryMin > 0) {
       try {
         final res = await _db
@@ -522,9 +630,6 @@ class JobSeekerHomeService {
       } catch (_) {}
     }
 
-    // ------------------------------------------------------------
-    // 6) Latest fallback
-    // ------------------------------------------------------------
     try {
       final res = await _db
           .from('job_listings')
@@ -537,20 +642,13 @@ class JobSeekerHomeService {
       addJobs(List<Map<String, dynamic>>.from(res), 40);
     } catch (_) {}
 
-    // ------------------------------------------------------------
-    // RANDOMIZE (but still weighted)
-    // ------------------------------------------------------------
     final rnd = Random();
-
-    // small shuffle so it feels mixed
     mixed.shuffle(rnd);
 
-    // then sort lightly by score (not strict)
     mixed.sort((a, b) {
       final sa = (a['__rec_score'] ?? 0) as int;
       final sb = (b['__rec_score'] ?? 0) as int;
 
-      // randomize within close score
       if ((sa - sb).abs() <= 10) {
         return rnd.nextBool() ? 1 : -1;
       }
@@ -558,10 +656,10 @@ class JobSeekerHomeService {
       return sb.compareTo(sa);
     });
 
-    // paginate
     if (offset >= mixed.length) return [];
 
-    final end = (offset + limit) > mixed.length ? mixed.length : (offset + limit);
+    final end =
+        (offset + limit) > mixed.length ? mixed.length : (offset + limit);
     final page = mixed.sublist(offset, end);
 
     for (final j in page) {
@@ -978,7 +1076,7 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // EXPECTED SALARY (PER MONTH) - KEEP AS IS
+  // EXPECTED SALARY (PER MONTH)
   // ============================================================
 
   Future<int> getExpectedSalaryPerMonth() async {
@@ -1038,7 +1136,6 @@ class JobSeekerHomeService {
           mobile_number,
           auth_provider,
 
-          // location (text + gps)
           location,
           current_location,
           current_city,
@@ -1048,13 +1145,11 @@ class JobSeekerHomeService {
           location_updated_at,
           default_search_radius_km,
 
-          // profile
           bio,
           skills,
           highest_education,
           total_experience_years,
 
-          // job preferences
           preferred_job_types,
           preferred_locations,
           expected_salary_min,
@@ -1062,22 +1157,18 @@ class JobSeekerHomeService {
           notice_period_days,
           is_open_to_work,
 
-          // resume
           resume_url,
           resume_headline,
           resume_updated_at,
 
-          // visibility & notifications
           is_profile_public,
           notification_enabled,
           job_alerts_enabled,
           language_preference,
 
-          // completion
           profile_completion_percentage,
           last_profile_update,
 
-          // optional work info
           current_job_title,
           current_company
         ''')
@@ -1088,9 +1179,21 @@ class JobSeekerHomeService {
 
     final p = Map<String, dynamic>.from(res);
 
-    // keep old keys used in UI (backward compatible)
+    // convert stored paths -> signed URLs for UI
+    final avatarRaw = (p['avatar_url'] ?? '').toString();
+    final resumeRaw = (p['resume_url'] ?? '').toString();
+
+    final avatarSigned =
+        avatarRaw.trim().isEmpty ? '' : await _toSignedUrlIfNeeded(avatarRaw);
+    final resumeSigned =
+        resumeRaw.trim().isEmpty ? '' : await _toSignedUrlIfNeeded(resumeRaw);
+
     return {
       ...p,
+
+      // signed urls for UI
+      'avatar_url': avatarSigned,
+      'resume_url': resumeSigned,
 
       // old UI expects:
       'phone': p['mobile_number'],
@@ -1099,8 +1202,7 @@ class JobSeekerHomeService {
       // old UI expects string:
       'preferred_job_type': _preferredJobTypeString(p['preferred_job_types']),
 
-      // you don't have preferred_employment_type in schema
-      // so keep it stable for UI
+      // not in schema
       'preferred_employment_type': 'Any',
     };
   }
@@ -1109,37 +1211,83 @@ class JobSeekerHomeService {
     _ensureAuthenticatedSync();
     final userId = _userId();
 
+    // IMPORTANT:
+    // Do not overwrite fields with empty string unless user intentionally changed.
+    // So we update only keys present in payload.
+
     final mapped = <String, dynamic>{};
 
-    mapped['full_name'] = (payload['full_name'] ?? '').toString().trim();
-    mapped['mobile_number'] = (payload['phone'] ?? '').toString().trim();
+    void putString(String key, String payloadKey) {
+      if (!payload.containsKey(payloadKey)) return;
+      mapped[key] = (payload[payloadKey] ?? '').toString().trim();
+    }
 
-    mapped['current_city'] = (payload['current_city'] ?? '').toString().trim();
-    mapped['current_state'] =
-        (payload['current_state'] ?? '').toString().trim();
+    void putInt(String key, String payloadKey) {
+      if (!payload.containsKey(payloadKey)) return;
+      mapped[key] = _toInt(payload[payloadKey]);
+    }
 
-    mapped['location'] = (payload['location_text'] ?? '').toString().trim();
+    // basic
+    putString('full_name', 'full_name');
+    putString('mobile_number', 'phone');
 
-    mapped['bio'] = (payload['bio'] ?? '').toString().trim();
-    mapped['skills'] = payload['skills'] ?? [];
+    // location text
+    putString('current_city', 'current_city');
+    putString('current_state', 'current_state');
+    putString('location', 'location_text');
 
-    mapped['highest_education'] =
-        (payload['highest_education'] ?? '').toString().trim();
+    // profile
+    putString('bio', 'bio');
 
-    mapped['total_experience_years'] = _toInt(payload['total_experience_years']);
+    if (payload.containsKey('skills')) {
+      mapped['skills'] = payload['skills'] ?? [];
+    }
 
-    final expectedSalaryMin = _toInt(payload['expected_salary_min']);
-    mapped['expected_salary_min'] =
-        expectedSalaryMin < 0 ? 0 : expectedSalaryMin;
-    mapped['expected_salary_max'] =
-        (expectedSalaryMin < 0 ? 0 : expectedSalaryMin) + 5000;
+    putString('highest_education', 'highest_education');
+    putInt('total_experience_years', 'total_experience_years');
 
-    mapped['notice_period_days'] = _toInt(payload['notice_period_days']);
+    // salary
+    if (payload.containsKey('expected_salary_min')) {
+      final expectedSalaryMin = _toInt(payload['expected_salary_min']);
+      final clean = expectedSalaryMin < 0 ? 0 : expectedSalaryMin;
+      mapped['expected_salary_min'] = clean;
+      mapped['expected_salary_max'] = clean > 0 ? clean + 5000 : 0;
+    }
 
-    final jt = (payload['preferred_job_type'] ?? 'Any').toString();
-    mapped['preferred_job_types'] = _preferredJobTypesArray(jt);
+    putInt('notice_period_days', 'notice_period_days');
 
-    final completion = _calculateProfileCompletion(mapped);
+    // preferred job types
+    if (payload.containsKey('preferred_job_type')) {
+      final jt = (payload['preferred_job_type'] ?? 'Any').toString();
+      mapped['preferred_job_types'] = _preferredJobTypesArray(jt);
+    }
+
+    // resume + avatar storage paths
+    // (payload should pass storage path, NOT signed URL)
+    if (payload.containsKey('avatar_url')) {
+      final v = (payload['avatar_url'] ?? '').toString().trim();
+      mapped['avatar_url'] = v;
+    }
+
+    if (payload.containsKey('resume_url')) {
+      final v = (payload['resume_url'] ?? '').toString().trim();
+      mapped['resume_url'] = v;
+    }
+
+    if (mapped.isEmpty) return;
+
+    final completion = _calculateProfileCompletion({
+      // we need existing values too
+      ...await _db
+          .from('user_profiles')
+          .select(
+            'full_name, mobile_number, current_city, current_state, highest_education, total_experience_years, expected_salary_min, skills, bio, preferred_job_types, resume_url, avatar_url',
+          )
+          .eq('id', userId)
+          .maybeSingle() ??
+          {},
+      ...mapped,
+    });
 
     await _db.from('user_profiles').update({
       ...mapped,
@@ -1175,6 +1323,9 @@ class JobSeekerHomeService {
       'skills',
       'bio',
       'preferred_job_types',
+      // add these too for better completion score
+      'resume_url',
+      'avatar_url',
     ];
 
     int filled = 0;
