@@ -56,10 +56,6 @@ class JobSeekerHomeService {
   // LOCATION HELPERS (Assam nearby logic)
   // ============================================================
 
-  /// We treat "Assam user" as:
-  /// - user_profiles.current_state == "Assam"
-  /// OR
-  /// - user_profiles.current_city / location contains "Assam"
   Future<bool> isUserInAssam() async {
     _ensureAuthenticatedSync();
     final userId = _userId();
@@ -87,9 +83,6 @@ class JobSeekerHomeService {
     }
   }
 
-  /// Reads from:
-  /// - user_profiles.current_latitude
-  /// - user_profiles.current_longitude
   Future<Map<String, double>?> getMyCurrentLatLngFromProfile() async {
     _ensureAuthenticatedSync();
     final userId = _userId();
@@ -129,7 +122,6 @@ class JobSeekerHomeService {
     return List<Map<String, dynamic>>.from(res);
   }
 
-  /// Distance (km) using Haversine
   double _haversineKm(double lat1, double lon1, double lat2, double lon2) {
     const r = 6371.0;
     final dLat = _deg2rad(lat2 - lat1);
@@ -252,14 +244,6 @@ class JobSeekerHomeService {
   // JOBS NEARBY (PAGINATED + Assam logic)
   // ============================================================
 
-  /// FINAL LOGIC:
-  /// - If user is not in Assam -> return Latest Jobs
-  /// - If user has no GPS -> return Latest Jobs
-  /// - Else:
-  ///     1) order districts by distance
-  ///     2) fetch jobs in those districts
-  ///     3) sort in Dart using district rank
-  ///     4) paginate in Dart
   Future<List<Map<String, dynamic>>> fetchJobsNearby({
     int offset = 0,
     int limit = 20,
@@ -301,15 +285,11 @@ class JobSeekerHomeService {
 
     final all = List<Map<String, dynamic>>.from(res);
 
-    // district priority map
     final districtRank = <String, int>{};
     for (int i = 0; i < districtsOrdered.length; i++) {
       districtRank[districtsOrdered[i].toLowerCase()] = i;
     }
 
-    // sort:
-    // 1) district rank
-    // 2) created_at desc
     all.sort((a, b) {
       final da = (a['district'] ?? '').toString().trim().toLowerCase();
       final db = (b['district'] ?? '').toString().trim().toLowerCase();
@@ -365,21 +345,9 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // RECOMMENDED JOBS (PAGINATED) - FIXED + MIXED LOGIC
+  // RECOMMENDED JOBS (PAGINATED) - MIXED + RANDOM
   // ============================================================
 
-  /// NEW RECOMMENDED LOGIC (NO AI YET):
-  ///
-  /// Mix list from:
-  /// 1) preferred_locations (district match)
-  /// 2) current_city (district match)
-  /// 3) education_required match (basic keyword contains)
-  /// 4) latest jobs fallback
-  ///
-  /// Then:
-  /// - remove duplicates
-  /// - sort by priority
-  /// - paginate AFTER mixing
   Future<List<Map<String, dynamic>>> getRecommendedJobs({
     int offset = 0,
     int limit = 20,
@@ -389,39 +357,52 @@ class JobSeekerHomeService {
     final userId = _userId();
     final nowIso = DateTime.now().toIso8601String();
 
-    // 1) Load user profile info needed for recommendation
+    // ------------------------------------------------------------
+    // Load profile data
+    // ------------------------------------------------------------
     List<String> preferredLocations = [];
     String currentCity = '';
     String highestEducation = '';
+    int expectedSalaryMin = 0;
 
     try {
       final p = await _db
           .from('user_profiles')
-          .select('preferred_locations, current_city, highest_education')
+          .select(
+            'preferred_locations, current_city, highest_education, expected_salary_min',
+          )
           .eq('id', userId)
           .maybeSingle();
 
       if (p != null) {
         final pl = p['preferred_locations'];
         if (pl is List) {
-          preferredLocations =
-              pl.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+          preferredLocations = pl
+              .map((e) => e.toString().trim())
+              .where((e) => e.isNotEmpty)
+              .toList();
         }
 
         currentCity = (p['current_city'] ?? '').toString().trim();
         highestEducation = (p['highest_education'] ?? '').toString().trim();
+
+        final rawSalary = p['expected_salary_min'];
+        if (rawSalary is int) expectedSalaryMin = rawSalary;
+        if (rawSalary != null && rawSalary is! int) {
+          expectedSalaryMin = int.tryParse(rawSalary.toString()) ?? 0;
+        }
       }
     } catch (_) {}
 
-    // Normalize
-    final currentCityLower = currentCity.toLowerCase();
+    final cityLower = currentCity.toLowerCase();
     final eduLower = highestEducation.toLowerCase();
 
-    // We'll build a scored list in Dart
+    // ------------------------------------------------------------
+    // Collector (dedupe)
+    // ------------------------------------------------------------
     final mixed = <Map<String, dynamic>>[];
     final seen = <String>{};
 
-    // Helper: add jobs with a score
     void addJobs(List<Map<String, dynamic>> jobs, int score) {
       for (final j in jobs) {
         final id = j['id']?.toString() ?? '';
@@ -435,7 +416,39 @@ class JobSeekerHomeService {
     }
 
     // ------------------------------------------------------------
-    // A) Preferred locations
+    // 1) Nearby districts (Assam only)
+    // ------------------------------------------------------------
+    try {
+      final inAssam = await isUserInAssam();
+      if (inAssam) {
+        final gps = await getMyCurrentLatLngFromProfile();
+        if (gps != null) {
+          final districts = await getAssamDistrictsByDistance(
+            userLat: gps['lat']!,
+            userLng: gps['lng']!,
+          );
+
+          // take only top 8 districts for recommended
+          final top = districts.take(8).toList();
+
+          if (top.isNotEmpty) {
+            final res = await _db
+                .from('job_listings')
+                .select(_jobWithCompanySelect)
+                .eq('status', 'active')
+                .gte('expires_at', nowIso)
+                .inFilter('district', top)
+                .order('created_at', ascending: false)
+                .limit(160);
+
+            addJobs(List<Map<String, dynamic>>.from(res), 110);
+          }
+        }
+      }
+    } catch (_) {}
+
+    // ------------------------------------------------------------
+    // 2) Preferred locations
     // ------------------------------------------------------------
     if (preferredLocations.isNotEmpty) {
       try {
@@ -446,14 +459,14 @@ class JobSeekerHomeService {
             .gte('expires_at', nowIso)
             .inFilter('district', preferredLocations)
             .order('created_at', ascending: false)
-            .limit(120);
+            .limit(160);
 
-        addJobs(List<Map<String, dynamic>>.from(res), 100);
+        addJobs(List<Map<String, dynamic>>.from(res), 95);
       } catch (_) {}
     }
 
     // ------------------------------------------------------------
-    // B) Current city match (district)
+    // 3) Current city/district
     // ------------------------------------------------------------
     if (currentCity.trim().isNotEmpty) {
       try {
@@ -462,16 +475,16 @@ class JobSeekerHomeService {
             .select(_jobWithCompanySelect)
             .eq('status', 'active')
             .gte('expires_at', nowIso)
-            .ilike('district', '%$currentCityLower%')
+            .ilike('district', '%$cityLower%')
             .order('created_at', ascending: false)
-            .limit(100);
+            .limit(140);
 
-        addJobs(List<Map<String, dynamic>>.from(res), 80);
+        addJobs(List<Map<String, dynamic>>.from(res), 85);
       } catch (_) {}
     }
 
     // ------------------------------------------------------------
-    // C) Education match (simple keyword contains)
+    // 4) Education match
     // ------------------------------------------------------------
     if (highestEducation.trim().isNotEmpty) {
       try {
@@ -482,14 +495,35 @@ class JobSeekerHomeService {
             .gte('expires_at', nowIso)
             .ilike('education_required', '%$eduLower%')
             .order('created_at', ascending: false)
-            .limit(120);
+            .limit(160);
 
-        addJobs(List<Map<String, dynamic>>.from(res), 60);
+        addJobs(List<Map<String, dynamic>>.from(res), 70);
       } catch (_) {}
     }
 
     // ------------------------------------------------------------
-    // D) Latest jobs fallback
+    // 5) Expected salary match (ONLY if profile has it)
+    // ------------------------------------------------------------
+    if (expectedSalaryMin > 0) {
+      try {
+        final res = await _db
+            .from('job_listings')
+            .select(_jobWithCompanySelect)
+            .eq('status', 'active')
+            .gte('expires_at', nowIso)
+            .or(
+              'salary_period.is.null,salary_period.eq.Monthly,salary_period.eq.monthly',
+            )
+            .gte('salary_max', expectedSalaryMin)
+            .order('salary_max', ascending: false)
+            .limit(160);
+
+        addJobs(List<Map<String, dynamic>>.from(res), 75);
+      } catch (_) {}
+    }
+
+    // ------------------------------------------------------------
+    // 6) Latest fallback
     // ------------------------------------------------------------
     try {
       final res = await _db
@@ -498,38 +532,38 @@ class JobSeekerHomeService {
           .eq('status', 'active')
           .gte('expires_at', nowIso)
           .order('created_at', ascending: false)
-          .limit(200);
+          .limit(220);
 
       addJobs(List<Map<String, dynamic>>.from(res), 40);
     } catch (_) {}
 
     // ------------------------------------------------------------
-    // Final sort:
-    // 1) rec_score desc
-    // 2) created_at desc
+    // RANDOMIZE (but still weighted)
     // ------------------------------------------------------------
+    final rnd = Random();
+
+    // small shuffle so it feels mixed
+    mixed.shuffle(rnd);
+
+    // then sort lightly by score (not strict)
     mixed.sort((a, b) {
       final sa = (a['__rec_score'] ?? 0) as int;
       final sb = (b['__rec_score'] ?? 0) as int;
-      if (sa != sb) return sb.compareTo(sa);
 
-      final ca = DateTime.tryParse((a['created_at'] ?? '').toString());
-      final cb = DateTime.tryParse((b['created_at'] ?? '').toString());
+      // randomize within close score
+      if ((sa - sb).abs() <= 10) {
+        return rnd.nextBool() ? 1 : -1;
+      }
 
-      if (ca == null && cb == null) return 0;
-      if (ca == null) return 1;
-      if (cb == null) return -1;
-
-      return cb.compareTo(ca);
+      return sb.compareTo(sa);
     });
 
-    // Paginate after mixing
+    // paginate
     if (offset >= mixed.length) return [];
 
     final end = (offset + limit) > mixed.length ? mixed.length : (offset + limit);
     final page = mixed.sublist(offset, end);
 
-    // remove internal key
     for (final j in page) {
       j.remove('__rec_score');
     }
@@ -944,7 +978,7 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // EXPECTED SALARY (PER MONTH)
+  // EXPECTED SALARY (PER MONTH) - KEEP AS IS
   // ============================================================
 
   Future<int> getExpectedSalaryPerMonth() async {
