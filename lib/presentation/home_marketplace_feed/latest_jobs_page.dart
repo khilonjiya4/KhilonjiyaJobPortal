@@ -59,35 +59,46 @@ class _LatestJobsPageState extends State<LatestJobsPage> {
   // LOAD: FIRST PAGE
   // ============================================================
   Future<void> _loadFirstPage() async {
-    if (!_disposed) {
-      setState(() {
-        _loading = true;
-        _loadingMore = false;
-        _hasMore = true;
-        _offset = 0;
-        _jobs = [];
-      });
-    }
+    if (_disposed) return;
+
+    setState(() {
+      _loading = true;
+      _loadingMore = false;
+      _hasMore = true;
+      _offset = 0;
+      _jobs = [];
+    });
 
     try {
       _savedJobIds = await _homeService.getUserSavedJobs();
+    } catch (_) {
+      _savedJobIds = {};
+    }
 
+    try {
       final first = await _homeService.fetchLatestJobs(
         offset: 0,
         limit: _pageSize,
       );
 
-      _jobs = first;
-      _offset = _jobs.length;
-      _hasMore = first.length >= _pageSize;
-    } catch (_) {
-      _jobs = [];
-      _savedJobIds = {};
-      _hasMore = false;
-    }
+      if (_disposed) return;
 
-    if (_disposed) return;
-    setState(() => _loading = false);
+      setState(() {
+        _jobs = first;
+        _offset = _jobs.length;
+        _hasMore = first.length >= _pageSize;
+        _loading = false;
+      });
+    } catch (_) {
+      if (_disposed) return;
+
+      setState(() {
+        _jobs = [];
+        _savedJobIds = {};
+        _hasMore = false;
+        _loading = false;
+      });
+    }
   }
 
   // ============================================================
@@ -95,6 +106,7 @@ class _LatestJobsPageState extends State<LatestJobsPage> {
   // ============================================================
   Future<void> _loadMore() async {
     if (_loadingMore || !_hasMore) return;
+    if (_disposed) return;
 
     setState(() => _loadingMore = true);
 
@@ -104,18 +116,23 @@ class _LatestJobsPageState extends State<LatestJobsPage> {
         limit: _pageSize,
       );
 
-      if (more.isEmpty) {
-        _hasMore = false;
-      } else {
-        _jobs.addAll(more);
-        _offset = _jobs.length;
+      if (_disposed) return;
 
-        if (more.length < _pageSize) {
+      setState(() {
+        if (more.isEmpty) {
           _hasMore = false;
+        } else {
+          _jobs.addAll(more);
+          _offset = _jobs.length;
+
+          if (more.length < _pageSize) {
+            _hasMore = false;
+          }
         }
-      }
+      });
     } catch (_) {
-      _hasMore = false;
+      if (_disposed) return;
+      setState(() => _hasMore = false);
     }
 
     if (_disposed) return;
@@ -193,6 +210,10 @@ class _LatestJobsPageState extends State<LatestJobsPage> {
                       style: KhilonjiyaUI.hTitle,
                     ),
                   ),
+                  IconButton(
+                    onPressed: _loading ? null : _loadFirstPage,
+                    icon: const Icon(Icons.refresh_rounded),
+                  ),
                 ],
               ),
             ),
@@ -227,11 +248,8 @@ class _LatestJobsPageState extends State<LatestJobsPage> {
                                   const EdgeInsets.fromLTRB(16, 16, 16, 24),
                               itemCount: _jobs.length + 1,
                               itemBuilder: (_, i) {
-                                // bottom loader
                                 if (i == _jobs.length) {
-                                  if (!_hasMore) {
-                                    return const SizedBox(height: 30);
-                                  }
+                                  if (!_hasMore) return const SizedBox(height: 30);
 
                                   return Padding(
                                     padding: const EdgeInsets.only(top: 10),
@@ -239,8 +257,7 @@ class _LatestJobsPageState extends State<LatestJobsPage> {
                                       child: _loadingMore
                                           ? const Padding(
                                               padding: EdgeInsets.all(12),
-                                              child:
-                                                  CircularProgressIndicator(),
+                                              child: CircularProgressIndicator(),
                                             )
                                           : const SizedBox(height: 10),
                                     ),
