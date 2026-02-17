@@ -449,6 +449,20 @@ class JobSeekerHomeService {
     return all.sublist(offset, end);
   }
 
+  Future<Map<String, dynamic>> fetchMyProfileRawPaths() async {
+  _ensureAuthenticatedSync();
+  final userId = _userId();
+
+  final res = await _db
+      .from('user_profiles')
+      .select('avatar_url, resume_url')
+      .eq('id', userId)
+      .maybeSingle();
+
+  if (res == null) return {};
+  return Map<String, dynamic>.from(res);
+}
+
   Future<List<Map<String, dynamic>>> fetchJobsByMinSalaryMonthly({
     required int minMonthlySalary,
     int offset = 0,
