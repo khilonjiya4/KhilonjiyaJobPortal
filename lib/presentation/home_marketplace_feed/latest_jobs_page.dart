@@ -17,7 +17,15 @@ class _LatestJobsPageState extends State<LatestJobsPage> {
   final JobSeekerHomeService _homeService = JobSeekerHomeService();
 
   bool _loading = true;
+  bool _loadingMore = false;
   bool _disposed = false;
+
+  bool _hasMore = true;
+  int _offset = 0;
+
+  static const int _pageSize = 20;
+
+  final ScrollController _scrollController = ScrollController();
 
   List<Map<String, dynamic>> _jobs = [];
   Set<String> _savedJobIds = {};
@@ -25,30 +33,98 @@ class _LatestJobsPageState extends State<LatestJobsPage> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _scrollController.addListener(_onScroll);
+    _loadFirstPage();
   }
 
   @override
   void dispose() {
     _disposed = true;
+    _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    if (!_disposed) setState(() => _loading = true);
+  void _onScroll() {
+    if (_loadingMore || !_hasMore || _loading) return;
+    if (!_scrollController.hasClients) return;
+
+    final pos = _scrollController.position;
+
+    if (pos.pixels >= pos.maxScrollExtent - 250) {
+      _loadMore();
+    }
+  }
+
+  // ============================================================
+  // LOAD: FIRST PAGE
+  // ============================================================
+  Future<void> _loadFirstPage() async {
+    if (!_disposed) {
+      setState(() {
+        _loading = true;
+        _loadingMore = false;
+        _hasMore = true;
+        _offset = 0;
+        _jobs = [];
+      });
+    }
 
     try {
       _savedJobIds = await _homeService.getUserSavedJobs();
-      _jobs = await _homeService.fetchLatestJobs(limit: 80);
+
+      final first = await _homeService.fetchLatestJobs(
+        offset: 0,
+        limit: _pageSize,
+      );
+
+      _jobs = first;
+      _offset = _jobs.length;
+      _hasMore = first.length >= _pageSize;
     } catch (_) {
       _jobs = [];
       _savedJobIds = {};
+      _hasMore = false;
     }
 
     if (_disposed) return;
     setState(() => _loading = false);
   }
 
+  // ============================================================
+  // LOAD: MORE
+  // ============================================================
+  Future<void> _loadMore() async {
+    if (_loadingMore || !_hasMore) return;
+
+    setState(() => _loadingMore = true);
+
+    try {
+      final more = await _homeService.fetchLatestJobs(
+        offset: _offset,
+        limit: _pageSize,
+      );
+
+      if (more.isEmpty) {
+        _hasMore = false;
+      } else {
+        _jobs.addAll(more);
+        _offset = _jobs.length;
+
+        if (more.length < _pageSize) {
+          _hasMore = false;
+        }
+      }
+    } catch (_) {
+      _hasMore = false;
+    }
+
+    if (_disposed) return;
+    setState(() => _loadingMore = false);
+  }
+
+  // ============================================================
+  // SAVE TOGGLE
+  // ============================================================
   Future<void> _toggleSaveJob(String jobId) async {
     try {
       final isSaved = await _homeService.toggleSaveJob(jobId);
@@ -60,6 +136,9 @@ class _LatestJobsPageState extends State<LatestJobsPage> {
     } catch (_) {}
   }
 
+  // ============================================================
+  // OPEN DETAILS
+  // ============================================================
   Future<void> _openJobDetails(Map<String, dynamic> job) async {
     final jobId = job['id']?.toString() ?? '';
     if (jobId.isEmpty) return;
@@ -108,7 +187,7 @@ class _LatestJobsPageState extends State<LatestJobsPage> {
                   const SizedBox(width: 2),
                   Expanded(
                     child: Text(
-                      "Latest jobs",
+                      "Latest Jobs",
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: KhilonjiyaUI.hTitle,
@@ -122,7 +201,7 @@ class _LatestJobsPageState extends State<LatestJobsPage> {
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : RefreshIndicator(
-                      onRefresh: _load,
+                      onRefresh: _loadFirstPage,
                       child: _jobs.isEmpty
                           ? ListView(
                               padding: const EdgeInsets.all(16),
@@ -143,10 +222,31 @@ class _LatestJobsPageState extends State<LatestJobsPage> {
                               ],
                             )
                           : ListView.builder(
+                              controller: _scrollController,
                               padding:
-                                  const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                              itemCount: _jobs.length,
+                                  const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                              itemCount: _jobs.length + 1,
                               itemBuilder: (_, i) {
+                                // bottom loader
+                                if (i == _jobs.length) {
+                                  if (!_hasMore) {
+                                    return const SizedBox(height: 30);
+                                  }
+
+                                  return Padding(
+                                    padding: const EdgeInsets.only(top: 10),
+                                    child: Center(
+                                      child: _loadingMore
+                                          ? const Padding(
+                                              padding: EdgeInsets.all(12),
+                                              child:
+                                                  CircularProgressIndicator(),
+                                            )
+                                          : const SizedBox(height: 10),
+                                    ),
+                                  );
+                                }
+
                                 final job = _jobs[i];
                                 final jobId = job['id']?.toString() ?? '';
 
