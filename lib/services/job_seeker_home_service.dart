@@ -56,12 +56,6 @@ class JobSeekerHomeService {
   // LOCATION HELPERS (Assam nearby logic)
   // ============================================================
 
-  /// We treat "Assam user" as:
-  /// - user_profiles.current_state == "Assam"
-  /// OR
-  /// - user_profiles.current_city / location contains "Assam"
-  ///
-  /// You can tighten this later.
   Future<bool> isUserInAssam() async {
     _ensureAuthenticatedSync();
     final userId = _userId();
@@ -89,10 +83,6 @@ class JobSeekerHomeService {
     }
   }
 
-  /// Gets the user's last known GPS.
-  /// We will read from:
-  /// - user_profiles.current_latitude
-  /// - user_profiles.current_longitude
   Future<Map<String, double>?> getMyCurrentLatLngFromProfile() async {
     _ensureAuthenticatedSync();
     final userId = _userId();
@@ -123,7 +113,6 @@ class JobSeekerHomeService {
     }
   }
 
-  /// Fetch Assam districts master list.
   Future<List<Map<String, dynamic>>> fetchAssamDistrictMaster() async {
     final res = await _db
         .from('assam_districts_master')
@@ -133,7 +122,8 @@ class JobSeekerHomeService {
     return List<Map<String, dynamic>>.from(res);
   }
 
-  /// Distance (km) using Haversine
+  double _deg2rad(double deg) => deg * (pi / 180.0);
+
   double _haversineKm(double lat1, double lon1, double lat2, double lon2) {
     const r = 6371.0;
     final dLat = _deg2rad(lat2 - lat1);
@@ -149,43 +139,6 @@ class JobSeekerHomeService {
     return r * c;
   }
 
-  double _deg2rad(double deg) => deg * (pi / 180.0);
-
-  /// Finds nearest Assam district name based on GPS.
-  Future<String?> getNearestAssamDistrictName({
-    required double userLat,
-    required double userLng,
-  }) async {
-    try {
-      final districts = await fetchAssamDistrictMaster();
-      if (districts.isEmpty) return null;
-
-      String? best;
-      double bestDist = 999999;
-
-      for (final d in districts) {
-        final name = (d['district_name'] ?? '').toString().trim();
-        if (name.isEmpty) continue;
-
-        final lat = double.tryParse(d['latitude'].toString());
-        final lng = double.tryParse(d['longitude'].toString());
-
-        if (lat == null || lng == null) continue;
-
-        final dist = _haversineKm(userLat, userLng, lat, lng);
-        if (dist < bestDist) {
-          bestDist = dist;
-          best = name;
-        }
-      }
-
-      return best;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// Returns Assam districts ordered by distance from user's GPS.
   Future<List<String>> getAssamDistrictsByDistance({
     required double userLat,
     required double userLng,
@@ -206,10 +159,7 @@ class JobSeekerHomeService {
 
         final dist = _haversineKm(userLat, userLng, lat, lng);
 
-        scored.add({
-          'name': name,
-          'dist': dist,
-        });
+        scored.add({'name': name, 'dist': dist});
       }
 
       scored.sort((a, b) {
@@ -291,17 +241,6 @@ class JobSeekerHomeService {
   // JOBS NEARBY (PAGINATED + Assam logic)
   // ============================================================
 
-  /// FINAL LOGIC:
-  /// - If user is not in Assam -> return Latest Jobs
-  /// - If user has no GPS -> return Latest Jobs
-  /// - Else:
-  ///     1) order districts by distance
-  ///     2) fetch jobs in that district order
-  ///
-  /// Pagination is done AFTER district ordering:
-  /// - We fetch a chunk from DB and then slice.
-  ///
-  /// This is not perfect DB-level pagination but works well for Assam.
   Future<List<Map<String, dynamic>>> fetchJobsNearby({
     int offset = 0,
     int limit = 20,
@@ -310,13 +249,11 @@ class JobSeekerHomeService {
 
     final inAssam = await isUserInAssam();
     if (!inAssam) {
-      // Outside Assam => Nearby = Latest
       return fetchLatestJobs(offset: offset, limit: limit);
     }
 
     final gps = await getMyCurrentLatLngFromProfile();
     if (gps == null) {
-      // Assam but no GPS => Nearby = Latest
       return fetchLatestJobs(offset: offset, limit: limit);
     }
 
@@ -334,15 +271,7 @@ class JobSeekerHomeService {
 
     final nowIso = DateTime.now().toIso8601String();
 
-    // NOTE:
-    // Supabase `.inFilter()` supports ordering by created_at,
-    // but NOT by custom district order.
-    //
-    // So we:
-    // 1) fetch jobs from Assam districts
-    // 2) sort in Dart using district distance order
-    // 3) paginate in Dart
-
+    // fetch large set, then sort + slice in Dart
     final res = await _db
         .from('job_listings')
         .select(_jobWithCompanySelect)
@@ -350,19 +279,15 @@ class JobSeekerHomeService {
         .gte('expires_at', nowIso)
         .inFilter('district', districtsOrdered)
         .order('created_at', ascending: false)
-        .limit(800); // enough for Assam MVP
+        .limit(800);
 
     final all = List<Map<String, dynamic>>.from(res);
 
-    // district priority map
     final districtRank = <String, int>{};
     for (int i = 0; i < districtsOrdered.length; i++) {
       districtRank[districtsOrdered[i].toLowerCase()] = i;
     }
 
-    // sort:
-    // 1) district rank
-    // 2) created_at desc
     all.sort((a, b) {
       final da = (a['district'] ?? '').toString().trim().toLowerCase();
       final db = (b['district'] ?? '').toString().trim().toLowerCase();
@@ -379,13 +304,12 @@ class JobSeekerHomeService {
       if (ca == null) return 1;
       if (cb == null) return -1;
 
-      return cb.compareTo(ca); // latest first
+      return cb.compareTo(ca);
     });
 
-    // paginate in Dart
     if (offset >= all.length) return [];
-
     final end = (offset + limit) > all.length ? all.length : (offset + limit);
+
     return all.sublist(offset, end);
   }
 
@@ -438,14 +362,9 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // RECOMMENDED JOBS (PAGINATED)
+  // RECOMMENDED JOBS (PAGINATED) - FIXED
   // ============================================================
 
-  /// IMPORTANT:
-  /// Recommendations table gives job_ids + match_score.
-  ///
-  /// We fetch those ids, then fetch jobs.
-  /// Then we sort again in Dart by match_score.
   Future<List<Map<String, dynamic>>> getRecommendedJobs({
     int offset = 0,
     int limit = 20,
@@ -456,7 +375,6 @@ class JobSeekerHomeService {
     final userId = _userId();
 
     try {
-      // Fetch more than needed because we will slice later.
       final rec = await _db
           .from('job_recommendations')
           .select('job_id, match_score')
@@ -472,13 +390,13 @@ class JobSeekerHomeService {
 
       final ids = recList.map((e) => e['job_id'].toString()).toList();
 
+      // IMPORTANT: do NOT limit here, fetch all ids
       final jobs = await _db
           .from('job_listings')
           .select(_jobWithCompanySelect)
           .inFilter('id', ids)
           .eq('status', 'active')
-          .gte('expires_at', nowIso)
-          .limit(limit);
+          .gte('expires_at', nowIso);
 
       final list = List<Map<String, dynamic>>.from(jobs);
 
@@ -496,6 +414,7 @@ class JobSeekerHomeService {
         j['match_score'] = scoreMap[id] ?? 0;
       }
 
+      // sort by match_score desc
       list.sort((a, b) {
         final sa = (a['match_score'] ?? 0) as int;
         final sb = (b['match_score'] ?? 0) as int;
@@ -516,183 +435,7 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // JOB DETAILS HELPERS
-  // ============================================================
-
-  Future<void> trackJobView(String jobId) async {
-    try {
-      final userId = _db.auth.currentUser?.id;
-      if (userId == null) return;
-
-      await _db.from('job_views').insert({
-        'user_id': userId,
-        'job_id': jobId,
-        'viewed_at': DateTime.now().toIso8601String(),
-        'device_type': 'mobile',
-      });
-
-      try {
-        await _db.from('user_job_activity').insert({
-          'user_id': userId,
-          'job_id': jobId,
-          'activity_type': 'viewed',
-          'activity_date': DateTime.now().toIso8601String(),
-        });
-      } catch (_) {}
-    } catch (e) {
-      debugPrint('trackJobView error: $e');
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> fetchSimilarJobs({
-    required String jobId,
-    int limit = 12,
-  }) async {
-    _ensureAuthenticatedSync();
-
-    final nowIso = DateTime.now().toIso8601String();
-
-    try {
-      final base = await _db
-          .from('job_listings')
-          .select('job_category_id, district, company_id')
-          .eq('id', jobId)
-          .maybeSingle();
-
-      if (base == null) return [];
-
-      final catId = base['job_category_id'];
-      final district = base['district'];
-      final companyId = base['company_id'];
-
-      final res = await _db
-          .from('job_listings')
-          .select(_jobWithCompanySelect)
-          .eq('status', 'active')
-          .gte('expires_at', nowIso)
-          .neq('id', jobId)
-          .neq('company_id', companyId)
-          .eq('job_category_id', catId)
-          .eq('district', district)
-          .order('created_at', ascending: false)
-          .limit(limit);
-
-      return List<Map<String, dynamic>>.from(res);
-    } catch (_) {
-      return [];
-    }
-  }
-
-  Future<Map<String, dynamic>?> fetchCompanyDetails(String companyId) async {
-    _ensureAuthenticatedSync();
-
-    final res = await _db
-        .from('companies')
-        .select(
-          '''
-          id,
-          name,
-          slug,
-          logo_url,
-          website,
-          description,
-          industry,
-          company_size,
-          founded_year,
-          headquarters_city,
-          headquarters_state,
-          rating,
-          total_reviews,
-          total_jobs,
-          is_verified,
-
-          business_type_id,
-          business_types_master (
-            id,
-            type_name,
-            logo_url
-          )
-        ''',
-        )
-        .eq('id', companyId)
-        .maybeSingle();
-
-    if (res == null) return null;
-    return Map<String, dynamic>.from(res);
-  }
-
-  // ============================================================
-  // FOLLOW COMPANY
-  // ============================================================
-
-  Future<bool> isCompanyFollowed(String companyId) async {
-    _ensureAuthenticatedSync();
-
-    final userId = _userId();
-
-    final res = await _db
-        .from('followed_companies')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('company_id', companyId)
-        .maybeSingle();
-
-    return res != null;
-  }
-
-  Future<bool> toggleFollowCompany(String companyId) async {
-    _ensureAuthenticatedSync();
-
-    final userId = _userId();
-
-    final existing = await _db
-        .from('followed_companies')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('company_id', companyId)
-        .maybeSingle();
-
-    if (existing != null) {
-      await _db
-          .from('followed_companies')
-          .delete()
-          .eq('user_id', userId)
-          .eq('company_id', companyId);
-
-      return false;
-    }
-
-    await _db.from('followed_companies').insert({
-      'user_id': userId,
-      'company_id': companyId,
-      'followed_at': DateTime.now().toIso8601String(),
-    });
-
-    return true;
-  }
-
-  // ============================================================
-  // COMPANY REVIEWS
-  // ============================================================
-
-  Future<List<Map<String, dynamic>>> fetchCompanyReviews({
-    required String companyId,
-    int limit = 20,
-  }) async {
-    _ensureAuthenticatedSync();
-
-    final res = await _db
-        .from('company_reviews')
-        .select('id, rating, review_text, created_at, is_anonymous')
-        .eq('company_id', companyId)
-        .order('created_at', ascending: false)
-        .limit(limit);
-
-    return List<Map<String, dynamic>>.from(res);
-  }
-
-  // ============================================================
-  // JOBS FILTERED BY SALARY (MONTHLY)
+  // JOBS FILTERED BY SALARY (MONTHLY) - PAGINATED
   // ============================================================
 
   Future<List<Map<String, dynamic>>> fetchJobsByMinSalaryMonthly({
@@ -721,7 +464,7 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // SAVED JOBS
+  // SAVED JOBS (PAGINATED)
   // ============================================================
 
   Future<Set<String>> getUserSavedJobs() async {
@@ -800,25 +543,6 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // APPLY STATUS
-  // ============================================================
-
-  Future<bool> hasAppliedToJob(String jobId) async {
-    _ensureAuthenticatedSync();
-
-    final userId = _userId();
-
-    final res = await _db
-        .from('job_applications_listings')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('listing_id', jobId)
-        .maybeSingle();
-
-    return res != null;
-  }
-
-  // ============================================================
   // APPLIED JOBS (PAGINATED)
   // ============================================================
 
@@ -869,265 +593,32 @@ class JobSeekerHomeService {
   }
 
   // ============================================================
-  // HOME SUMMARY
+  // JOB DETAILS HELPERS
   // ============================================================
 
-  Future<Map<String, dynamic>> getHomeProfileSummary() async {
-    final user = _db.auth.currentUser;
-
-    if (user == null) {
-      return {
-        "profileName": "Your Profile",
-        "profileCompletion": 0,
-        "lastUpdatedText": "Updated recently",
-        "missingDetails": 0,
-      };
-    }
-
+  Future<void> trackJobView(String jobId) async {
     try {
-      final profile = await _db
-          .from('user_profiles')
-          .select(
-            'full_name, profile_completion_percentage, last_profile_update',
-          )
-          .eq('id', user.id)
-          .maybeSingle();
+      final userId = _db.auth.currentUser?.id;
+      if (userId == null) return;
 
-      String profileName = "Your Profile";
-      int completion = 0;
-      String lastUpdatedText = "Updated recently";
+      await _db.from('job_views').insert({
+        'user_id': userId,
+        'job_id': jobId,
+        'viewed_at': DateTime.now().toIso8601String(),
+        'device_type': 'mobile',
+      });
 
-      if (profile != null) {
-        final fullName = (profile['full_name'] ?? '').toString().trim();
-        profileName = _firstNameOrFallback(fullName);
-
-        completion =
-            _toInt(profile['profile_completion_percentage']).clamp(0, 100);
-
-        lastUpdatedText =
-            _formatLastUpdated(profile['last_profile_update']?.toString());
-      }
-
-      return {
-        "profileName": profileName,
-        "profileCompletion": completion,
-        "lastUpdatedText": lastUpdatedText,
-        "missingDetails": completion >= 100 ? 0 : 1,
-      };
-    } catch (_) {
-      return {
-        "profileName": "Your Profile",
-        "profileCompletion": 0,
-        "lastUpdatedText": "Updated recently",
-        "missingDetails": 0,
-      };
+      try {
+        await _db.from('user_job_activity').insert({
+          'user_id': userId,
+          'job_id': jobId,
+          'activity_type': 'viewed',
+          'activity_date': DateTime.now().toIso8601String(),
+        });
+      } catch (_) {}
+    } catch (e) {
+      debugPrint('trackJobView error: $e');
     }
-  }
-
-  Future<int> getJobsPostedTodayCount() async {
-    try {
-      final now = DateTime.now();
-      final start = DateTime(now.year, now.month, now.day);
-      final end = start.add(const Duration(days: 1));
-
-      final res = await _db
-          .from('job_listings')
-          .select('id')
-          .eq('status', 'active')
-          .gte('created_at', start.toIso8601String())
-          .lt('created_at', end.toIso8601String());
-
-      return (res as List).length;
-    } catch (_) {
-      return 0;
-    }
-  }
-
-  // ============================================================
-  // EXPECTED SALARY (PER MONTH)
-  // ============================================================
-
-  Future<int> getExpectedSalaryPerMonth() async {
-    _ensureAuthenticatedSync();
-
-    final userId = _userId();
-
-    try {
-      final profile = await _db
-          .from('user_profiles')
-          .select('expected_salary_min')
-          .eq('id', userId)
-          .maybeSingle();
-
-      if (profile == null) return 0;
-
-      final raw = profile['expected_salary_min'];
-      if (raw == null) return 0;
-
-      if (raw is int) return raw;
-      return int.tryParse(raw.toString()) ?? 0;
-    } catch (_) {
-      return 0;
-    }
-  }
-
-  Future<void> updateExpectedSalaryPerMonth(int salary) async {
-    _ensureAuthenticatedSync();
-
-    final userId = _userId();
-
-    final clean = salary < 0 ? 0 : salary;
-    final max = clean + 5000;
-
-    await _db.from('user_profiles').update({
-      'expected_salary_min': clean,
-      'expected_salary_max': max,
-      'last_profile_update': DateTime.now().toIso8601String(),
-    }).eq('id', userId);
-  }
-
-  // ============================================================
-  // PROFILE
-  // ============================================================
-
-  Future<Map<String, dynamic>> fetchMyProfile() async {
-    _ensureAuthenticatedSync();
-    final userId = _userId();
-
-    final res = await _db
-        .from('user_profiles')
-        .select('''
-          id,
-          full_name,
-          mobile_number,
-          current_city,
-          current_state,
-          location,
-          bio,
-          skills,
-          highest_education,
-          total_experience_years,
-          expected_salary_min,
-          expected_salary_max,
-          notice_period_days,
-          preferred_job_types,
-          profile_completion_percentage,
-          last_profile_update
-        ''')
-        .eq('id', userId)
-        .maybeSingle();
-
-    if (res == null) return {};
-
-    final p = Map<String, dynamic>.from(res);
-
-    return {
-      ...p,
-      'phone': p['mobile_number'],
-      'location_text': p['location'],
-      'preferred_job_type': _preferredJobTypeString(p['preferred_job_types']),
-      'preferred_employment_type': 'Any',
-    };
-  }
-
-  Future<void> updateMyProfile(Map<String, dynamic> payload) async {
-    _ensureAuthenticatedSync();
-    final userId = _userId();
-
-    final mapped = <String, dynamic>{};
-
-    mapped['full_name'] = (payload['full_name'] ?? '').toString().trim();
-    mapped['mobile_number'] = (payload['phone'] ?? '').toString().trim();
-
-    mapped['current_city'] = (payload['current_city'] ?? '').toString().trim();
-    mapped['current_state'] =
-        (payload['current_state'] ?? '').toString().trim();
-
-    mapped['location'] = (payload['location_text'] ?? '').toString().trim();
-
-    mapped['bio'] = (payload['bio'] ?? '').toString().trim();
-    mapped['skills'] = payload['skills'] ?? [];
-
-    mapped['highest_education'] =
-        (payload['highest_education'] ?? '').toString().trim();
-
-    mapped['total_experience_years'] = _toInt(payload['total_experience_years']);
-
-    final expectedSalaryMin = _toInt(payload['expected_salary_min']);
-    mapped['expected_salary_min'] =
-        expectedSalaryMin < 0 ? 0 : expectedSalaryMin;
-    mapped['expected_salary_max'] =
-        (expectedSalaryMin < 0 ? 0 : expectedSalaryMin) + 5000;
-
-    mapped['notice_period_days'] = _toInt(payload['notice_period_days']);
-
-    final jt = (payload['preferred_job_type'] ?? 'Any').toString();
-    mapped['preferred_job_types'] = _preferredJobTypesArray(jt);
-
-    final completion = _calculateProfileCompletion(mapped);
-
-    await _db.from('user_profiles').update({
-      ...mapped,
-      'profile_completion_percentage': completion,
-      'last_profile_update': DateTime.now().toIso8601String(),
-    }).eq('id', userId);
-  }
-
-  String _preferredJobTypeString(dynamic raw) {
-    if (raw == null) return 'Any';
-    if (raw is List) {
-      if (raw.isEmpty) return 'Any';
-      return raw.first.toString();
-    }
-    return raw.toString();
-  }
-
-  List<String> _preferredJobTypesArray(String jobType) {
-    final v = jobType.trim();
-    if (v.isEmpty || v.toLowerCase() == 'any') return [];
-    return [v];
-  }
-
-  int _calculateProfileCompletion(Map<String, dynamic> p) {
-    final fields = [
-      'full_name',
-      'mobile_number',
-      'current_city',
-      'current_state',
-      'highest_education',
-      'total_experience_years',
-      'expected_salary_min',
-      'skills',
-      'bio',
-      'preferred_job_types',
-    ];
-
-    int filled = 0;
-
-    for (final f in fields) {
-      final v = p[f];
-
-      bool ok = false;
-
-      if (v == null) {
-        ok = false;
-      } else if (v is String) {
-        ok = v.trim().isNotEmpty;
-      } else if (v is int) {
-        ok = v > 0;
-      } else if (v is double) {
-        ok = v > 0;
-      } else if (v is List) {
-        ok = v.isNotEmpty;
-      } else {
-        ok = v.toString().trim().isNotEmpty;
-      }
-
-      if (ok) filled++;
-    }
-
-    final pct = ((filled / fields.length) * 100).round();
-    return pct.clamp(0, 100);
   }
 
   // ============================================================
