@@ -1,5 +1,3 @@
-// File: lib/presentation/home_marketplace_feed/jobs_by_salary_page.dart
-
 import 'package:flutter/material.dart';
 
 import '../../core/ui/khilonjiya_ui.dart';
@@ -26,9 +24,17 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
   final JobSeekerHomeService _homeService = JobSeekerHomeService();
 
   bool _loading = true;
+  bool _loadingMore = false;
   bool _disposed = false;
 
   int _expectedSalary = 0;
+
+  bool _hasMore = true;
+  int _offset = 0;
+
+  static const int _pageSize = 20;
+
+  final ScrollController _scrollController = ScrollController();
 
   List<Map<String, dynamic>> _jobs = [];
   Set<String> _savedJobIds = {};
@@ -36,20 +42,41 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _scrollController.addListener(_onScroll);
+    _loadFirstPage();
   }
 
   @override
   void dispose() {
     _disposed = true;
+    _scrollController.dispose();
     super.dispose();
   }
 
+  void _onScroll() {
+    if (_loading || _loadingMore || !_hasMore) return;
+    if (!_scrollController.hasClients) return;
+
+    final pos = _scrollController.position;
+
+    if (pos.pixels >= pos.maxScrollExtent - 250) {
+      _loadMore();
+    }
+  }
+
   // ------------------------------------------------------------
-  // LOAD
+  // LOAD: FIRST PAGE
   // ------------------------------------------------------------
-  Future<void> _load() async {
-    if (!_disposed) setState(() => _loading = true);
+  Future<void> _loadFirstPage() async {
+    if (!_disposed) {
+      setState(() {
+        _loading = true;
+        _loadingMore = false;
+        _jobs = [];
+        _hasMore = true;
+        _offset = 0;
+      });
+    }
 
     // 1) saved jobs
     try {
@@ -78,18 +105,57 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
       return;
     }
 
-    // 4) fetch jobs
+    // 4) fetch jobs (first page)
     try {
-      _jobs = await _homeService.fetchJobsByMinSalaryMonthly(
+      final first = await _homeService.fetchJobsByMinSalaryMonthly(
         minMonthlySalary: _expectedSalary,
-        limit: 80,
+        offset: 0,
+        limit: _pageSize,
       );
+
+      _jobs = first;
+      _offset = _jobs.length;
+      _hasMore = first.length >= _pageSize;
     } catch (_) {
       _jobs = [];
+      _hasMore = false;
     }
 
     if (_disposed) return;
     setState(() => _loading = false);
+  }
+
+  // ------------------------------------------------------------
+  // LOAD: MORE
+  // ------------------------------------------------------------
+  Future<void> _loadMore() async {
+    if (_loadingMore || !_hasMore) return;
+
+    setState(() => _loadingMore = true);
+
+    try {
+      final more = await _homeService.fetchJobsByMinSalaryMonthly(
+        minMonthlySalary: _expectedSalary,
+        offset: _offset,
+        limit: _pageSize,
+      );
+
+      if (more.isEmpty) {
+        _hasMore = false;
+      } else {
+        _jobs.addAll(more);
+        _offset = _jobs.length;
+
+        if (more.length < _pageSize) {
+          _hasMore = false;
+        }
+      }
+    } catch (_) {
+      _hasMore = false;
+    }
+
+    if (_disposed) return;
+    setState(() => _loadingMore = false);
   }
 
   // ------------------------------------------------------------
@@ -269,7 +335,7 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
       if (_disposed) return;
 
       setState(() => _expectedSalary = clean);
-      await _load();
+      await _loadFirstPage();
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -414,17 +480,36 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
 
   Widget _jobsList() {
     return RefreshIndicator(
-      onRefresh: _load,
+      onRefresh: _loadFirstPage,
       child: ListView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 30),
-        itemCount: _jobs.length + 1,
+        controller: _scrollController,
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        itemCount: _jobs.length + 2,
         itemBuilder: (_, i) {
+          // header
           if (i == 0) {
             return Column(
               children: [
                 _headerCard(),
                 const SizedBox(height: 14),
               ],
+            );
+          }
+
+          // bottom loader
+          if (i == _jobs.length + 1) {
+            if (!_hasMore) return const SizedBox(height: 30);
+
+            return Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Center(
+                child: _loadingMore
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: CircularProgressIndicator(),
+                      )
+                    : const SizedBox(height: 10),
+              ),
             );
           }
 
@@ -475,7 +560,7 @@ class _JobsBySalaryPageState extends State<JobsBySalaryPage> {
                     ),
                   ),
                   IconButton(
-                    onPressed: _load,
+                    onPressed: _loadFirstPage,
                     icon: const Icon(Icons.refresh_rounded),
                   ),
                 ],
