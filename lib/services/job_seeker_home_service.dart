@@ -210,6 +210,49 @@ class JobSeekerHomeService {
     return path;
   }
 
+Future<List<Map<String, dynamic>>> fetchPremiumJobs({
+  int offset = 0,
+  int limit = 20,
+}) async {
+  _ensureAuthenticatedSync();
+
+  final nowIso = DateTime.now().toIso8601String();
+
+  final res = await _db
+      .from('job_listings')
+      .select(_jobWithCompanySelect)
+      .eq('status', 'active')
+      .gte('expires_at', nowIso)
+      .eq('is_premium', true)
+      .order('created_at', ascending: false)
+      .range(offset, offset + limit - 1);
+
+  return List<Map<String, dynamic>>.from(res);
+}
+
+
+
+Future<List<Map<String, dynamic>>> fetchCompanyJobs({
+  required String companyId,
+  int offset = 0,
+  int limit = 20,
+}) async {
+  _ensureAuthenticatedSync();
+
+  final nowIso = DateTime.now().toIso8601String();
+
+  final res = await _db
+      .from('job_listings')
+      .select(_jobWithCompanySelect)
+      .eq('status', 'active')
+      .gte('expires_at', nowIso)
+      .eq('company_id', companyId)
+      .order('created_at', ascending: false)
+      .range(offset, offset + limit - 1);
+
+  return List<Map<String, dynamic>>.from(res);
+}
+
   /// Upload photo + save to profile in DB
   Future<String> uploadMyPhotoAndSave({
     required Uint8List bytes,
