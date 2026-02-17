@@ -1032,21 +1032,54 @@ class JobSeekerHomeService {
         .from('user_profiles')
         .select('''
           id,
+          email,
           full_name,
+          avatar_url,
           mobile_number,
+          auth_provider,
+
+          // location (text + gps)
+          location,
+          current_location,
           current_city,
           current_state,
-          location,
+          current_latitude,
+          current_longitude,
+          location_updated_at,
+          default_search_radius_km,
+
+          // profile
           bio,
           skills,
           highest_education,
           total_experience_years,
+
+          // job preferences
+          preferred_job_types,
+          preferred_locations,
           expected_salary_min,
           expected_salary_max,
           notice_period_days,
-          preferred_job_types,
+          is_open_to_work,
+
+          // resume
+          resume_url,
+          resume_headline,
+          resume_updated_at,
+
+          // visibility & notifications
+          is_profile_public,
+          notification_enabled,
+          job_alerts_enabled,
+          language_preference,
+
+          // completion
           profile_completion_percentage,
-          last_profile_update
+          last_profile_update,
+
+          // optional work info
+          current_job_title,
+          current_company
         ''')
         .eq('id', userId)
         .maybeSingle();
@@ -1055,11 +1088,19 @@ class JobSeekerHomeService {
 
     final p = Map<String, dynamic>.from(res);
 
+    // keep old keys used in UI (backward compatible)
     return {
       ...p,
+
+      // old UI expects:
       'phone': p['mobile_number'],
       'location_text': p['location'],
+
+      // old UI expects string:
       'preferred_job_type': _preferredJobTypeString(p['preferred_job_types']),
+
+      // you don't have preferred_employment_type in schema
+      // so keep it stable for UI
       'preferred_employment_type': 'Any',
     };
   }
