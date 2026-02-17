@@ -17,7 +17,15 @@ class _MyJobsPageState extends State<MyJobsPage> {
   final JobSeekerHomeService _homeService = JobSeekerHomeService();
 
   bool _loading = true;
+  bool _loadingMore = false;
   bool _disposed = false;
+
+  bool _hasMore = true;
+  int _offset = 0;
+
+  static const int _pageSize = 20;
+
+  final ScrollController _scrollController = ScrollController();
 
   List<Map<String, dynamic>> _appliedJobs = [];
   Set<String> _savedJobIds = {};
@@ -25,39 +33,103 @@ class _MyJobsPageState extends State<MyJobsPage> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _scrollController.addListener(_onScroll);
+    _loadFirstPage();
   }
 
   @override
   void dispose() {
     _disposed = true;
+    _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    if (!_disposed) setState(() => _loading = true);
+  void _onScroll() {
+    if (_loading || _loadingMore || !_hasMore) return;
+    if (!_scrollController.hasClients) return;
 
-    // Load saved jobs for bookmark state
+    final pos = _scrollController.position;
+
+    if (pos.pixels >= pos.maxScrollExtent - 250) {
+      _loadMore();
+    }
+  }
+
+  // ============================================================
+  // LOAD: FIRST PAGE
+  // ============================================================
+  Future<void> _loadFirstPage() async {
+    if (_disposed) return;
+
+    setState(() {
+      _loading = true;
+      _loadingMore = false;
+      _appliedJobs = [];
+      _hasMore = true;
+      _offset = 0;
+    });
+
+    // 1) saved jobs
     try {
       _savedJobIds = await _homeService.getUserSavedJobs();
     } catch (_) {
       _savedJobIds = {};
     }
 
-    // Load applied jobs
+    // 2) applied jobs first page
     try {
-      _appliedJobs = await _homeService.fetchAppliedJobs(limit: 80);
+      final first = await _homeService.fetchAppliedJobs(
+        offset: 0,
+        limit: _pageSize,
+      );
+
+      _appliedJobs = first;
+      _offset = _appliedJobs.length;
+      _hasMore = first.length >= _pageSize;
     } catch (_) {
       _appliedJobs = [];
+      _hasMore = false;
     }
 
     if (_disposed) return;
     setState(() => _loading = false);
   }
 
-  // ------------------------------------------------------------
+  // ============================================================
+  // LOAD: MORE
+  // ============================================================
+  Future<void> _loadMore() async {
+    if (_loadingMore || !_hasMore) return;
+
+    setState(() => _loadingMore = true);
+
+    try {
+      final more = await _homeService.fetchAppliedJobs(
+        offset: _offset,
+        limit: _pageSize,
+      );
+
+      if (more.isEmpty) {
+        _hasMore = false;
+      } else {
+        _appliedJobs.addAll(more);
+        _offset = _appliedJobs.length;
+
+        if (more.length < _pageSize) {
+          _hasMore = false;
+        }
+      }
+    } catch (_) {
+      _hasMore = false;
+    }
+
+    if (_disposed) return;
+    setState(() => _loadingMore = false);
+  }
+
+  // ============================================================
   // SAVE / UNSAVE
-  // ------------------------------------------------------------
+  // ============================================================
   Future<void> _toggleSaveJob(String jobId) async {
     try {
       final isSaved = await _homeService.toggleSaveJob(jobId);
@@ -74,9 +146,9 @@ class _MyJobsPageState extends State<MyJobsPage> {
     }
   }
 
-  // ------------------------------------------------------------
+  // ============================================================
   // OPEN JOB DETAILS
-  // ------------------------------------------------------------
+  // ============================================================
   Future<void> _openJobDetails(Map<String, dynamic> job) async {
     final jobId = job['id']?.toString() ?? '';
     if (jobId.trim().isEmpty) return;
@@ -103,9 +175,9 @@ class _MyJobsPageState extends State<MyJobsPage> {
     setState(() {});
   }
 
-  // ------------------------------------------------------------
+  // ============================================================
   // UI
-  // ------------------------------------------------------------
+  // ============================================================
   Widget _emptyState() {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -170,11 +242,29 @@ class _MyJobsPageState extends State<MyJobsPage> {
 
   Widget _appliedList() {
     return RefreshIndicator(
-      onRefresh: _load,
+      onRefresh: _loadFirstPage,
       child: ListView.builder(
+        controller: _scrollController,
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-        itemCount: _appliedJobs.length,
+        itemCount: _appliedJobs.length + 1,
         itemBuilder: (_, i) {
+          // bottom loader
+          if (i == _appliedJobs.length) {
+            if (!_hasMore) return const SizedBox(height: 30);
+
+            return Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Center(
+                child: _loadingMore
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: CircularProgressIndicator(),
+                      )
+                    : const SizedBox(height: 10),
+              ),
+            );
+          }
+
           final job = _appliedJobs[i];
           final jobId = job['id']?.toString() ?? '';
 
@@ -216,7 +306,7 @@ class _MyJobsPageState extends State<MyJobsPage> {
                     ),
                   ),
                   IconButton(
-                    onPressed: _load,
+                    onPressed: _loading ? null : _loadFirstPage,
                     icon: const Icon(Icons.refresh_rounded),
                   ),
                 ],
