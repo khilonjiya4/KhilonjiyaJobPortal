@@ -17,7 +17,15 @@ class _RecommendedJobsPageState extends State<RecommendedJobsPage> {
   final JobSeekerHomeService _homeService = JobSeekerHomeService();
 
   bool _loading = true;
+  bool _loadingMore = false;
   bool _disposed = false;
+
+  bool _hasMore = true;
+  int _offset = 0;
+
+  static const int _pageSize = 20;
+
+  final ScrollController _scrollController = ScrollController();
 
   List<Map<String, dynamic>> _jobs = [];
   Set<String> _savedJobIds = {};
@@ -25,30 +33,73 @@ class _RecommendedJobsPageState extends State<RecommendedJobsPage> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _scrollController.addListener(_onScroll);
+    _loadFirstPage();
   }
 
   @override
   void dispose() {
     _disposed = true;
+    _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    if (!_disposed) setState(() => _loading = true);
+  void _onScroll() {
+    if (_loading || _loadingMore || !_hasMore) return;
+    if (!_scrollController.hasClients) return;
 
+    final pos = _scrollController.position;
+
+    if (pos.pixels >= pos.maxScrollExtent - 250) {
+      _loadMore();
+    }
+  }
+
+  // ------------------------------------------------------------
+  // LOAD FIRST PAGE
+  // ------------------------------------------------------------
+  Future<void> _loadFirstPage() async {
+    if (_disposed) return;
+
+    setState(() {
+      _loading = true;
+      _loadingMore = false;
+      _jobs = [];
+      _hasMore = true;
+      _offset = 0;
+    });
+
+    // saved jobs
     try {
-      // 1) load saved jobs (for bookmark UI)
       _savedJobIds = await _homeService.getUserSavedJobs();
-
-      // 2) load recommended jobs
-      _jobs = await _homeService.getRecommendedJobs(limit: 80);
     } catch (_) {
-      // fallback
+      _savedJobIds = {};
+    }
+
+    // recommended jobs (paginated)
+    try {
+      final first = await _homeService.getRecommendedJobs(
+        offset: 0,
+        limit: _pageSize,
+      );
+
+      _jobs = first;
+      _offset = _jobs.length;
+      _hasMore = first.length >= _pageSize;
+    } catch (_) {
+      // fallback to latest jobs
       try {
-        _jobs = await _homeService.fetchJobs(limit: 80);
+        final first = await _homeService.fetchJobs(
+          offset: 0,
+          limit: _pageSize,
+        );
+
+        _jobs = first;
+        _offset = _jobs.length;
+        _hasMore = first.length >= _pageSize;
       } catch (_) {
         _jobs = [];
+        _hasMore = false;
       }
     }
 
@@ -56,6 +107,60 @@ class _RecommendedJobsPageState extends State<RecommendedJobsPage> {
     setState(() => _loading = false);
   }
 
+  // ------------------------------------------------------------
+  // LOAD MORE
+  // ------------------------------------------------------------
+  Future<void> _loadMore() async {
+    if (_loadingMore || !_hasMore) return;
+
+    setState(() => _loadingMore = true);
+
+    try {
+      final more = await _homeService.getRecommendedJobs(
+        offset: _offset,
+        limit: _pageSize,
+      );
+
+      if (more.isEmpty) {
+        _hasMore = false;
+      } else {
+        _jobs.addAll(more);
+        _offset = _jobs.length;
+
+        if (more.length < _pageSize) {
+          _hasMore = false;
+        }
+      }
+    } catch (_) {
+      // fallback pagination
+      try {
+        final more = await _homeService.fetchJobs(
+          offset: _offset,
+          limit: _pageSize,
+        );
+
+        if (more.isEmpty) {
+          _hasMore = false;
+        } else {
+          _jobs.addAll(more);
+          _offset = _jobs.length;
+
+          if (more.length < _pageSize) {
+            _hasMore = false;
+          }
+        }
+      } catch (_) {
+        _hasMore = false;
+      }
+    }
+
+    if (_disposed) return;
+    setState(() => _loadingMore = false);
+  }
+
+  // ------------------------------------------------------------
+  // SAVE / UNSAVE
+  // ------------------------------------------------------------
   Future<void> _toggleSaveJob(String jobId) async {
     try {
       final isSaved = await _homeService.toggleSaveJob(jobId);
@@ -73,11 +178,13 @@ class _RecommendedJobsPageState extends State<RecommendedJobsPage> {
     }
   }
 
+  // ------------------------------------------------------------
+  // JOB DETAILS
+  // ------------------------------------------------------------
   Future<void> _openJobDetails(Map<String, dynamic> job) async {
     final jobId = job['id']?.toString() ?? '';
     if (jobId.trim().isEmpty) return;
 
-    // track view (fire and forget)
     _homeService.trackJobView(jobId);
 
     await Navigator.push(
@@ -91,7 +198,6 @@ class _RecommendedJobsPageState extends State<RecommendedJobsPage> {
       ),
     );
 
-    // refresh saved state when coming back
     try {
       _savedJobIds = await _homeService.getUserSavedJobs();
     } catch (_) {}
@@ -100,6 +206,9 @@ class _RecommendedJobsPageState extends State<RecommendedJobsPage> {
     setState(() {});
   }
 
+  // ------------------------------------------------------------
+  // UI
+  // ------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -129,6 +238,10 @@ class _RecommendedJobsPageState extends State<RecommendedJobsPage> {
                       style: KhilonjiyaUI.hTitle,
                     ),
                   ),
+                  IconButton(
+                    onPressed: _loading ? null : _loadFirstPage,
+                    icon: const Icon(Icons.refresh_rounded),
+                  ),
                 ],
               ),
             ),
@@ -137,7 +250,7 @@ class _RecommendedJobsPageState extends State<RecommendedJobsPage> {
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : RefreshIndicator(
-                      onRefresh: _load,
+                      onRefresh: _loadFirstPage,
                       child: _jobs.isEmpty
                           ? ListView(
                               padding: const EdgeInsets.all(16),
@@ -166,10 +279,31 @@ class _RecommendedJobsPageState extends State<RecommendedJobsPage> {
                               ],
                             )
                           : ListView.builder(
+                              controller: _scrollController,
                               padding:
                                   const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                              itemCount: _jobs.length,
+                              itemCount: _jobs.length + 1,
                               itemBuilder: (_, i) {
+                                // bottom loader
+                                if (i == _jobs.length) {
+                                  if (!_hasMore) {
+                                    return const SizedBox(height: 30);
+                                  }
+
+                                  return Padding(
+                                    padding: const EdgeInsets.only(top: 10),
+                                    child: Center(
+                                      child: _loadingMore
+                                          ? const Padding(
+                                              padding: EdgeInsets.all(12),
+                                              child:
+                                                  CircularProgressIndicator(),
+                                            )
+                                          : const SizedBox(height: 10),
+                                    ),
+                                  );
+                                }
+
                                 final job = _jobs[i];
                                 final jobId = job['id']?.toString() ?? '';
 
