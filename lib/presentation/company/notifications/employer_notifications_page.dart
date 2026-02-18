@@ -14,6 +14,8 @@ class _EmployerNotificationsPageState extends State<EmployerNotificationsPage> {
   final SupabaseClient _db = Supabase.instance.client;
 
   bool _loading = true;
+  bool _busy = false;
+
   List<Map<String, dynamic>> _items = [];
 
   static const Color _bg = Color(0xFFF7F8FA);
@@ -34,7 +36,19 @@ class _EmployerNotificationsPageState extends State<EmployerNotificationsPage> {
     return u;
   }
 
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg)),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // LOAD (REAL)
+  // ------------------------------------------------------------
   Future<void> _load() async {
+    if (!mounted) return;
     setState(() => _loading = true);
 
     try {
@@ -48,7 +62,7 @@ class _EmployerNotificationsPageState extends State<EmployerNotificationsPage> {
           .limit(50);
 
       _items = List<Map<String, dynamic>>.from(res);
-    } catch (_) {
+    } catch (e) {
       _items = [];
     }
 
@@ -56,24 +70,56 @@ class _EmployerNotificationsPageState extends State<EmployerNotificationsPage> {
     setState(() => _loading = false);
   }
 
+  // ------------------------------------------------------------
+  // MARK ALL READ (REAL + SAFE)
+  // ------------------------------------------------------------
   Future<void> _markAllRead() async {
+    if (_busy) return;
+
+    setState(() => _busy = true);
+
     try {
       final user = _requireUser();
+
       await _db
           .from('notifications')
           .update({'is_read': true})
           .eq('user_id', user.id)
           .eq('is_read', false);
-      await _load();
+
+      // Update local instantly (no need reload)
+      for (final n in _items) {
+        n['is_read'] = true;
+      }
+
+      if (mounted) setState(() {});
     } catch (_) {}
+
+    if (!mounted) return;
+    setState(() => _busy = false);
   }
 
+  // ------------------------------------------------------------
+  // MARK SINGLE READ (REAL + SAFE)
+  // ------------------------------------------------------------
   Future<void> _markRead(String id) async {
+    final nid = id.trim();
+    if (nid.isEmpty) return;
+
     try {
-      await _db.from('notifications').update({'is_read': true}).eq('id', id);
+      final user = _requireUser();
+
+      await _db
+          .from('notifications')
+          .update({'is_read': true})
+          .eq('id', nid)
+          .eq('user_id', user.id);
     } catch (_) {}
   }
 
+  // ------------------------------------------------------------
+  // BUILD
+  // ------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -85,12 +131,14 @@ class _EmployerNotificationsPageState extends State<EmployerNotificationsPage> {
         foregroundColor: _text,
         actions: [
           TextButton(
-            onPressed: _markAllRead,
-            child: const Text(
-              "Mark all read",
+            onPressed: (_loading || _busy || _items.isEmpty) ? null : _markAllRead,
+            child: Text(
+              _busy ? "..." : "Mark all read",
               style: TextStyle(
                 fontWeight: FontWeight.w900,
-                color: _primary,
+                color: (_loading || _busy || _items.isEmpty)
+                    ? const Color(0xFF94A3B8)
+                    : _primary,
               ),
             ),
           ),
@@ -169,11 +217,16 @@ class _EmployerNotificationsPageState extends State<EmployerNotificationsPage> {
     return InkWell(
       onTap: () async {
         if (!isRead) await _markRead(id);
+
         if (!mounted) return;
         setState(() {
-          final idx = _items.indexWhere((e) => (e['id'] ?? '').toString() == id);
+          final idx =
+              _items.indexWhere((e) => (e['id'] ?? '').toString() == id);
           if (idx != -1) _items[idx]['is_read'] = true;
         });
+
+        // OPTIONAL:
+        // Later we will route based on n['data'] (jobId, listingRowId etc.)
       },
       borderRadius: BorderRadius.circular(20),
       child: Container(
@@ -208,7 +261,7 @@ class _EmployerNotificationsPageState extends State<EmployerNotificationsPage> {
                           title,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontWeight: FontWeight.w900,
                             color: _text,
                             fontSize: 13.8,
