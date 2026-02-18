@@ -1,4 +1,6 @@
+// lib/presentation/company/jobs/job_applicants_screen.dart
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/ui/khilonjiya_ui.dart';
 import '../../../services/employer_applicants_service.dart';
@@ -6,8 +8,8 @@ import '../../../services/employer_applicants_service.dart';
 class JobApplicantsScreen extends StatefulWidget {
   final String jobId;
 
-  // companyId is OPTIONAL now (screen will auto-resolve from job)
-  // because your route only sends jobId.
+  // Optional: can be passed from route
+  // But we always resolve from job_listings for correctness.
   final String? companyId;
 
   const JobApplicantsScreen({
@@ -30,6 +32,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
 
   // Resolved from job
   String _resolvedCompanyId = '';
+  String _jobTitle = '';
 
   // Filters
   String _filter = 'all';
@@ -56,6 +59,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
 
   void _toast(String msg) {
     if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg)),
     );
@@ -66,14 +70,13 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
     setState(() => _loading = true);
 
     try {
-      // Security check: employer owns job
       final job = await _service.ensureJobOwnerAndGetJob(widget.jobId);
 
-      // Resolve companyId from job (best source)
-      _resolvedCompanyId = (job['company_id'] ?? '').toString();
+      _resolvedCompanyId = (job['company_id'] ?? '').toString().trim();
+      _jobTitle = (job['job_title'] ?? '').toString().trim();
 
       // fallback if passed
-      if (_resolvedCompanyId.trim().isEmpty && widget.companyId != null) {
+      if (_resolvedCompanyId.isEmpty && widget.companyId != null) {
         _resolvedCompanyId = widget.companyId!.trim();
       }
 
@@ -214,6 +217,84 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
   }
 
   // ------------------------------------------------------------
+  // NOTES (REAL)
+  // ------------------------------------------------------------
+  Future<void> _editNotes(Map<String, dynamic> row) async {
+    final listingRowId = (row['id'] ?? '').toString();
+    final existing = (row['employer_notes'] ?? '').toString();
+
+    final c = TextEditingController(text: existing);
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) {
+        return AlertDialog(
+          title: const Text("Employer Notes"),
+          content: TextField(
+            controller: c,
+            maxLines: 6,
+            decoration: const InputDecoration(
+              hintText: "Write private notes for your team...",
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _primary,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text("Save"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (ok != true) return;
+
+    try {
+      await _service.updateEmployerNotes(
+        listingRowId: listingRowId,
+        jobId: widget.jobId,
+        notes: c.text.trim(),
+      );
+
+      row['employer_notes'] = c.text.trim();
+      if (mounted) setState(() {});
+      _toast("Saved");
+    } catch (e) {
+      _toast("Failed: ${e.toString()}");
+    }
+  }
+
+  // ------------------------------------------------------------
+  // OPEN RESUME (REAL)
+  // ------------------------------------------------------------
+  Future<void> _openResume(Map<String, dynamic> row) async {
+    final app = (row['job_applications'] ?? {}) as Map;
+    final url = (app['resume_file_url'] ?? '').toString().trim();
+
+    if (url.isEmpty) {
+      _toast("Resume not uploaded");
+      return;
+    }
+
+    try {
+      final uri = Uri.parse(url);
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok) _toast("Cannot open resume");
+    } catch (e) {
+      _toast("Cannot open resume: ${e.toString()}");
+    }
+  }
+
+  // ------------------------------------------------------------
   // DETAILS SHEET
   // ------------------------------------------------------------
   void _openApplicant(Map<String, dynamic> row) async {
@@ -233,6 +314,8 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
 
     final status =
         (row['application_status'] ?? 'applied').toString().toLowerCase();
+
+    final interviewDate = row['interview_date'];
 
     showModalBottomSheet(
       context: context,
@@ -284,6 +367,8 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                   _kv("Experience", exp.isEmpty ? "Not provided" : exp),
                   _kv("Expected Salary",
                       salary.isEmpty ? "Not provided" : salary),
+                  if (interviewDate != null)
+                    _kv("Interview", _formatDateTime(interviewDate)),
                   const SizedBox(height: 12),
                   Text(
                     "Skills",
@@ -314,13 +399,70 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                     child: Text(
                       notes.trim().isEmpty ? "No notes yet." : notes,
                       style: const TextStyle(
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w800,
                         color: _text,
                         height: 1.35,
                       ),
                     ),
                   ),
                   const SizedBox(height: 14),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _busy
+                              ? null
+                              : () async {
+                                  Navigator.pop(context);
+                                  await _openResume(row);
+                                },
+                          icon: const Icon(Icons.description_outlined),
+                          label: const Text(
+                            "Resume",
+                            style: TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _text,
+                            backgroundColor: const Color(0xFFF8FAFC),
+                            side: const BorderSide(color: _border),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _busy
+                              ? null
+                              : () async {
+                                  Navigator.pop(context);
+                                  await _editNotes(row);
+                                },
+                          icon: const Icon(Icons.edit_note_rounded),
+                          label: const Text(
+                            "Notes",
+                            style: TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _primary,
+                            backgroundColor: const Color(0xFFEFF6FF),
+                            side: const BorderSide(color: Color(0xFFBFDBFE)),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 10),
+
                   Row(
                     children: [
                       Expanded(
@@ -374,7 +516,9 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                       ),
                     ],
                   ),
+
                   const SizedBox(height: 10),
+
                   Row(
                     children: [
                       Expanded(
@@ -428,6 +572,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                       ),
                     ],
                   ),
+
                   const SizedBox(height: 16),
                 ],
               ),
@@ -456,6 +601,22 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(34),
+          child: Container(
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: Text(
+              _jobTitle.isEmpty ? "Job Applicants" : _jobTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontWeight: FontWeight.w800,
+                color: _muted,
+              ),
+            ),
+          ),
+        ),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -597,6 +758,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
         (row['application_status'] ?? 'applied').toString().toLowerCase();
 
     final appliedAt = row['applied_at'];
+    final interviewAt = row['interview_date'];
 
     return InkWell(
       onTap: () => _openApplicant(row),
@@ -647,6 +809,18 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                           color: _muted,
                         ),
                       ),
+                      if (status == 'interview_scheduled' && interviewAt != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            "Interview: ${_formatDateTime(interviewAt)}",
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF7C2D12),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -663,7 +837,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: _mini(Icons.timeline_outlined,
-                      exp.isEmpty ? "Experience: - " : exp),
+                      exp.isEmpty ? "Experience: -" : exp),
                 ),
               ],
             ),
@@ -865,5 +1039,16 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     if (diff.inDays == 1) return '1d ago';
     return '${diff.inDays}d ago';
+  }
+
+  String _formatDateTime(dynamic date) {
+    final d = DateTime.tryParse(date.toString());
+    if (d == null) return '';
+    final dd = d.day.toString().padLeft(2, '0');
+    final mm = d.month.toString().padLeft(2, '0');
+    final yy = d.year.toString();
+    final hh = d.hour.toString().padLeft(2, '0');
+    final mi = d.minute.toString().padLeft(2, '0');
+    return "$dd/$mm/$yy $hh:$mi";
   }
 }
