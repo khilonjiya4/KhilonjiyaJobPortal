@@ -3,10 +3,18 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/ui/app_links.dart';
 import '../../../core/ui/khilonjiya_ui.dart';
 import '../../../routes/app_routes.dart';
 import '../../../services/mobile_auth_service.dart';
 import '../../../services/subscription_service.dart';
+
+// Pages (direct open)
+import '../job_search_page.dart';
+import '../recommended_jobs_page.dart';
+import '../saved_jobs_page.dart';
+import '../profile_performance_page.dart';
+import '../subscription_page.dart';
 
 class NaukriDrawer extends StatefulWidget {
   final String userName;
@@ -29,10 +37,6 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
 
   bool _loadingPro = true;
   bool _isProActive = false;
-
-  // Temporary dummy link (replace later)
-  static const String _playStoreUrl =
-      "https://play.google.com/store/apps/details?id=com.example.khilonjiya";
 
   @override
   void initState() {
@@ -92,14 +96,18 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
     Navigator.pop(context);
   }
 
-  Future<void> _go(String routeName, {Object? args}) async {
+  Future<void> _pushNamed(String routeName, {Object? args}) async {
     _closeDrawer();
-
-    // small delay avoids drawer animation glitch
     await Future.delayed(const Duration(milliseconds: 80));
-
     if (!mounted) return;
     await Navigator.of(context).pushNamed(routeName, arguments: args);
+  }
+
+  Future<void> _pushPage(Widget page) async {
+    _closeDrawer();
+    await Future.delayed(const Duration(milliseconds: 80));
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
   }
 
   Future<void> _logout() async {
@@ -119,13 +127,28 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
   // PLAYSTORE LIKE
   // ------------------------------------------------------------
   Future<void> _openPlayStore() async {
-    final uri = Uri.parse(_playStoreUrl);
+    final url = AppLinks.playStoreUrl.trim();
+    if (url.isEmpty) return;
+
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
 
     try {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } catch (_) {
       // ignore
     }
+  }
+
+  // ------------------------------------------------------------
+  // PRO CARD
+  // ------------------------------------------------------------
+  Future<void> _openSubscription() async {
+    await _pushPage(const SubscriptionPage());
+
+    // refresh pro status when user comes back
+    await Future.delayed(const Duration(milliseconds: 300));
+    if (mounted) _loadProStatus();
   }
 
   @override
@@ -184,7 +207,7 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
 
                       Expanded(
                         child: InkWell(
-                          onTap: () => _go(AppRoutes.profileEdit),
+                          onTap: () => _pushNamed(AppRoutes.profileEdit),
                           borderRadius: BorderRadius.circular(14),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(vertical: 6),
@@ -240,12 +263,7 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
                     )
                   else
                     InkWell(
-                      onTap: () async {
-                        await _go(AppRoutes.jobSeekerHome);
-
-                        // switch bottom nav to subscription tab:
-                        // (We will implement this later properly.)
-                      },
+                      onTap: _openSubscription,
                       borderRadius: KhilonjiyaUI.r16,
                       child: Container(
                         padding: const EdgeInsets.all(14),
@@ -340,35 +358,25 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
                   _menuItem(
                     icon: Icons.search,
                     title: "Search jobs",
-                    onTap: () async {
-                      // You still open the search page directly currently
-                      // We will route it later.
-                      await _go(AppRoutes.jobSeekerHome);
-                    },
+                    onTap: () => _pushPage(const JobSearchPage()),
                   ),
 
                   _menuItem(
                     icon: Icons.star_outline,
                     title: "Recommended jobs",
-                    onTap: () async {
-                      await _go(AppRoutes.jobSeekerHome);
-                    },
+                    onTap: () => _pushPage(const RecommendedJobsPage()),
                   ),
 
                   _menuItem(
                     icon: Icons.bookmark_outline,
                     title: "Saved jobs",
-                    onTap: () async {
-                      await _go(AppRoutes.jobSeekerHome);
-                    },
+                    onTap: () => _pushPage(const SavedJobsPage()),
                   ),
 
                   _menuItem(
                     icon: Icons.person_outline,
                     title: "Profile performance",
-                    onTap: () async {
-                      await _go(AppRoutes.jobSeekerHome);
-                    },
+                    onTap: () => _pushPage(const ProfilePerformancePage()),
                   ),
 
                   const SizedBox(height: 8),
@@ -378,13 +386,15 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
                   _menuItem(
                     icon: Icons.settings_outlined,
                     title: "Settings",
-                    onTap: () async => _go(AppRoutes.settings),
+                    onTap: () => _pushNamed(AppRoutes.settings),
                   ),
 
+                  // You DO NOT have AppRoutes.help in your routes.
+                  // So we open Contact & Support (real page you already have).
                   _menuItem(
                     icon: Icons.help_outline_rounded,
                     title: "Help",
-                    onTap: () async => _go(AppRoutes.help),
+                    onTap: () => _pushNamed(AppRoutes.contactSupport),
                   ),
 
                   const SizedBox(height: 8),
@@ -520,7 +530,7 @@ class _NaukriDrawerState extends State<NaukriDrawer> {
                       color: KhilonjiyaUI.muted,
                     )),
             ],
-          ],
+          ),
         ),
       ),
     );
