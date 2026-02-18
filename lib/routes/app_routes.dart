@@ -93,7 +93,7 @@ class AppRoutes {
   static const String employerJobs = '/employer-jobs';
   static const String createJob = '/create-job';
 
-  // Requires arguments: { jobId, companyId }
+  // Requires arguments: { jobId } or { jobId, companyId }
   static const String jobApplicants = '/job-applicants';
 
   // Requires arguments: { jobId, companyId }
@@ -162,14 +162,14 @@ class AppRoutes {
           );
         }
 
-        final jobId = (args['jobId'] ?? '').toString();
-        final companyId = (args['companyId'] ?? '').toString();
+        final jobId = (args['jobId'] ?? '').toString().trim();
+        final companyId = (args['companyId'] ?? '').toString().trim();
 
-        if (jobId.trim().isEmpty || companyId.trim().isEmpty) {
+        if (jobId.isEmpty) {
           return MaterialPageRoute(
             builder: (_) => const Scaffold(
               body: Center(
-                child: Text("jobId/companyId missing for applicants screen"),
+                child: Text("jobId missing for applicants screen"),
               ),
             ),
           );
@@ -178,7 +178,7 @@ class AppRoutes {
         return MaterialPageRoute(
           builder: (_) => JobApplicantsScreen(
             jobId: jobId,
-            companyId: companyId,
+            companyId: companyId.isEmpty ? null : companyId,
           ),
         );
 
@@ -195,10 +195,10 @@ class AppRoutes {
           );
         }
 
-        final jobId = (args['jobId'] ?? '').toString();
-        final companyId = (args['companyId'] ?? '').toString();
+        final jobId = (args['jobId'] ?? '').toString().trim();
+        final companyId = (args['companyId'] ?? '').toString().trim();
 
-        if (jobId.trim().isEmpty || companyId.trim().isEmpty) {
+        if (jobId.isEmpty || companyId.isEmpty) {
           return MaterialPageRoute(
             builder: (_) => const Scaffold(
               body: Center(
