@@ -41,8 +41,10 @@ class _AboutAppPageState extends State<AboutAppPage> {
     final u = url.trim();
     if (u.isEmpty) return;
 
+    final uri = Uri.tryParse(u);
+    if (uri == null) return;
+
     try {
-      final uri = Uri.parse(u);
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } catch (_) {
       // ignore
@@ -215,8 +217,10 @@ class _AboutAppPageState extends State<AboutAppPage> {
     required String subtitle,
     required VoidCallback onTap,
   }) {
+    final sub = subtitle.trim();
+
     return InkWell(
-      onTap: onTap,
+      onTap: sub.isEmpty ? null : onTap,
       borderRadius: KhilonjiyaUI.r16,
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
@@ -242,7 +246,7 @@ class _AboutAppPageState extends State<AboutAppPage> {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    subtitle.trim().isEmpty ? "Not set" : subtitle,
+                    sub.isEmpty ? "Not set" : sub,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: KhilonjiyaUI.sub.copyWith(
@@ -252,7 +256,11 @@ class _AboutAppPageState extends State<AboutAppPage> {
                 ],
               ),
             ),
-            const Icon(Icons.open_in_new, color: KhilonjiyaUI.muted),
+            Icon(
+              sub.isEmpty ? Icons.lock_outline : Icons.open_in_new,
+              color: KhilonjiyaUI.muted,
+              size: 20,
+            ),
           ],
         ),
       ),
