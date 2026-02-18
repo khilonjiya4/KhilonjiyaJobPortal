@@ -32,8 +32,11 @@ import '../presentation/company/jobs/create_job_screen.dart';
 import '../presentation/company/jobs/employer_job_list_screen.dart';
 import '../presentation/company/jobs/job_applicants_screen.dart';
 
-// ✅ NEW: PIPELINE
+// PIPELINE
 import '../presentation/company/jobs/job_applicants_pipeline_page.dart';
+
+// ✅ NEW: EMPLOYER NOTIFICATIONS
+import '../presentation/company/notifications/employer_notifications_page.dart';
 
 class AppRoutes {
   // ------------------------------------------------------------
@@ -93,8 +96,11 @@ class AppRoutes {
   // Requires argument: jobId (String)
   static const String jobApplicants = '/job-applicants';
 
-  // ✅ NEW: Requires arguments: { jobId, companyId }
+  // Requires arguments: { jobId, companyId }
   static const String jobApplicantsPipeline = '/job-applicants-pipeline';
+
+  // ✅ NEW
+  static const String employerNotifications = '/employer-notifications';
 
   // ------------------------------------------------------------
   // ROUTES MAP (NO-ARGUMENT ROUTES ONLY)
@@ -131,6 +137,9 @@ class AppRoutes {
     companyDashboard: (_) => const CompanyDashboard(),
     employerJobs: (_) => const EmployerJobListScreen(),
     createJob: (_) => const CreateJobScreen(),
+
+    // notifications
+    employerNotifications: (_) => const EmployerNotificationsPage(),
   };
 
   // ------------------------------------------------------------
@@ -155,7 +164,6 @@ class AppRoutes {
           builder: (_) => JobApplicantsScreen(jobId: jobId),
         );
 
-      // ✅ NEW: PIPELINE ROUTE
       case jobApplicantsPipeline:
         final args = settings.arguments;
 
