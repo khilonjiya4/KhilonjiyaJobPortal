@@ -1,4 +1,7 @@
+import 'dart:math';
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:sizer/sizer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -25,6 +28,12 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
   List<Map<String, dynamic>> _rows = [];
 
   // ------------------------------------------------------------
+  // STORAGE CONFIG (MUST MATCH JobSeekerHomeService)
+  // ------------------------------------------------------------
+  static const String _bucketJobFiles = 'job-files';
+  static const int _signedUrlExpirySeconds = 60 * 60; // 1 hour
+
+  // ------------------------------------------------------------
   // FLUENT LIGHT PALETTE
   // ------------------------------------------------------------
   static const _bg = Color(0xFFF6F7FB);
@@ -38,6 +47,57 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
   void initState() {
     super.initState();
     _loadApplicants();
+  }
+
+  // ------------------------------------------------------------
+  // AUTH
+  // ------------------------------------------------------------
+  String _userId() {
+    final user = _client.auth.currentUser;
+    if (user == null) throw Exception("Session expired");
+    return user.id;
+  }
+
+  // ------------------------------------------------------------
+  // STORAGE HELPERS
+  // ------------------------------------------------------------
+  bool _looksLikeHttpUrl(String s) {
+    final v = s.trim().toLowerCase();
+    return v.startsWith('http://') || v.startsWith('https://');
+  }
+
+  Future<String> _toSignedUrlIfNeeded(String raw) async {
+    final v = raw.trim();
+    if (v.isEmpty) return '';
+    if (_looksLikeHttpUrl(v)) return v;
+
+    try {
+      final signed = await _client.storage.from(_bucketJobFiles).createSignedUrl(
+            v,
+            _signedUrlExpirySeconds,
+          );
+      return signed;
+    } catch (_) {
+      return v;
+    }
+  }
+
+  // ------------------------------------------------------------
+  // SECURITY: ENSURE THIS EMPLOYER OWNS THIS JOB
+  // ------------------------------------------------------------
+  Future<bool> _ensureJobOwner() async {
+    final userId = _userId();
+
+    final job = await _client
+        .from('job_listings')
+        .select('id, employer_id')
+        .eq('id', widget.jobId)
+        .maybeSingle();
+
+    if (job == null) return false;
+
+    final employerId = (job['employer_id'] ?? '').toString();
+    return employerId == userId;
   }
 
   // ------------------------------------------------------------
@@ -61,16 +121,17 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
         return;
       }
 
-      /// IMPORTANT:
-      /// Your real schema (job_applications) fields:
-      /// - name
-      /// - phone
-      /// - email
-      /// - skills (TEXT)
-      /// - resume_file_url
-      /// - photo_file_url
-      /// - experience_level
-      /// - experience_details
+      // 🔒 Security check
+      final ok = await _ensureJobOwner();
+      if (!ok) {
+        if (!mounted) return;
+        setState(() {
+          _loading = false;
+          _error = "You are not allowed to view applicants for this job.";
+        });
+        return;
+      }
+
       final res = await _client
           .from('job_applications_listings')
           .select('''
@@ -110,13 +171,34 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
           .eq('listing_id', widget.jobId)
           .order('applied_at', ascending: false);
 
+      final rows = List<Map<String, dynamic>>.from(res);
+
+      // convert storage paths -> signed urls for UI
+      for (final row in rows) {
+        final app = row['job_applications'];
+        if (app is! Map) continue;
+
+        final resumeRaw = (app['resume_file_url'] ?? '').toString().trim();
+        final photoRaw = (app['photo_file_url'] ?? '').toString().trim();
+
+        if (resumeRaw.isNotEmpty) {
+          app['resume_file_url'] = await _toSignedUrlIfNeeded(resumeRaw);
+        }
+        if (photoRaw.isNotEmpty) {
+          app['photo_file_url'] = await _toSignedUrlIfNeeded(photoRaw);
+        }
+      }
+
       if (!mounted) return;
 
       setState(() {
-        _rows = List<Map<String, dynamic>>.from(res);
+        _rows = rows;
         _loading = false;
       });
     } catch (e) {
+      if (kDebugMode) {
+        debugPrint("JobApplicantsScreen load error: $e");
+      }
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -126,14 +208,27 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
   }
 
   // ------------------------------------------------------------
-  // UPDATE STATUS
+  // UPDATE STATUS + INSERT EVENT
   // ------------------------------------------------------------
   Future<void> _updateStatus(String listingRowId, String status) async {
     try {
+      final userId = _userId();
+
       await _client
           .from('job_applications_listings')
           .update({'application_status': status})
           .eq('id', listingRowId);
+
+      // log event (schema has application_events)
+      try {
+        await _client.from('application_events').insert({
+          'job_application_listing_id': listingRowId,
+          'event_type': 'status_changed',
+          'actor_user_id': userId,
+          'notes': 'Status changed to $status',
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      } catch (_) {}
 
       await _loadApplicants();
     } catch (_) {
@@ -226,10 +321,10 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                           final app = (row['job_applications'] ?? {})
                               as Map<String, dynamic>;
 
-                          final name =
-                              (app['name'] ?? '').toString().trim().ifEmpty(
-                                    "Candidate",
-                                  );
+                          final name = (app['name'] ?? '')
+                              .toString()
+                              .trim()
+                              .ifEmpty("Candidate");
 
                           final phone = (app['phone'] ?? '').toString().trim();
                           final email = (app['email'] ?? '').toString().trim();
@@ -323,7 +418,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
           // Header
           Row(
             children: [
-              _avatar(photoUrl),
+              _avatar(photoUrl, name),
               SizedBox(width: 3.w),
               Expanded(
                 child: Column(
@@ -416,7 +511,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                 icon: Icons.currency_rupee_rounded,
                 text: expectedSalary.isEmpty
                     ? "Salary not set"
-                    : "₹$expectedSalary",
+                    : expectedSalary,
               ),
             ],
           ),
@@ -544,17 +639,29 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
     );
   }
 
-  Widget _avatar(String photoUrl) {
+  Widget _avatar(String photoUrl, String name) {
     if (photoUrl.trim().isEmpty) {
+      final letter = name.trim().isEmpty ? 'C' : name.trim()[0].toUpperCase();
+      final color = Colors.primaries[
+          Random(name.hashCode).nextInt(Colors.primaries.length)];
+
       return Container(
         width: 52,
         height: 52,
         decoration: BoxDecoration(
-          color: const Color(0xFFF1F5F9),
+          color: color.withOpacity(0.10),
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: _line),
         ),
-        child: const Icon(Icons.person_rounded, color: _text),
+        alignment: Alignment.center,
+        child: Text(
+          letter,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w900,
+            color: color,
+          ),
+        ),
       );
     }
 
@@ -585,8 +692,10 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: const Color(0xFFFECACA)),
           ),
-          child: const Icon(Icons.error_outline_rounded,
-              color: Color(0xFF9F1239)),
+          child: const Icon(
+            Icons.error_outline_rounded,
+            color: Color(0xFF9F1239),
+          ),
         ),
       ),
     );
@@ -740,161 +849,4 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
     return _StatusUI(
       label: "Applied",
       bg: const Color(0xFFEFF6FF),
-      fg: const Color(0xFF1D4ED8),
-    );
-  }
-
-  String _appliedAgo(dynamic date) {
-    if (date == null) return "Applied recently";
-
-    final d = DateTime.tryParse(date.toString());
-    if (d == null) return "Applied recently";
-
-    final diff = DateTime.now().difference(d);
-
-    if (diff.inMinutes < 2) return "Applied just now";
-    if (diff.inMinutes < 60) return "Applied ${diff.inMinutes}m ago";
-    if (diff.inHours < 24) return "Applied ${diff.inHours}h ago";
-    if (diff.inDays == 1) return "Applied 1 day ago";
-    return "Applied ${diff.inDays} days ago";
-  }
-
-  // ------------------------------------------------------------
-  // STATES
-  // ------------------------------------------------------------
-  Widget _emptyState() {
-    return Center(
-      child: Padding(
-        padding: EdgeInsets.all(7.w),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 78,
-              height: 78,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF1F5F9),
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: _line),
-              ),
-              child: const Icon(
-                Icons.people_alt_outlined,
-                size: 34,
-                color: Color(0xFF334155),
-              ),
-            ),
-            SizedBox(height: 2.4.h),
-            const Text(
-              'No applicants yet',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w900,
-                color: _text,
-                letterSpacing: -0.2,
-              ),
-            ),
-            SizedBox(height: 1.h),
-            const Text(
-              'Candidates will appear here once they apply for this job.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: _muted,
-                fontWeight: FontWeight.w700,
-                height: 1.35,
-              ),
-            ),
-            SizedBox(height: 2.6.h),
-            OutlinedButton.icon(
-              onPressed: _loadApplicants,
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text(
-                "Refresh",
-                style: TextStyle(fontWeight: FontWeight.w900),
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: _text,
-                side: const BorderSide(color: _line),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _errorState() {
-    return Center(
-      child: Padding(
-        padding: EdgeInsets.all(7.w),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 78,
-              height: 78,
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF1F2),
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: const Color(0xFFFECACA)),
-              ),
-              child: const Icon(
-                Icons.error_outline_rounded,
-                size: 34,
-                color: Color(0xFF9F1239),
-              ),
-            ),
-            SizedBox(height: 2.4.h),
-            Text(
-              _error ?? "Something went wrong",
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w900,
-                color: _text,
-              ),
-            ),
-            SizedBox(height: 1.8.h),
-            OutlinedButton.icon(
-              onPressed: _loadApplicants,
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text(
-                "Try Again",
-                style: TextStyle(fontWeight: FontWeight.w900),
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: _text,
-                side: const BorderSide(color: _line),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusUI {
-  final String label;
-  final Color bg;
-  final Color fg;
-
-  _StatusUI({
-    required this.label,
-    required this.bg,
-    required this.fg,
-  });
-}
-
-extension _StringExt on String {
-  String ifEmpty(String fallback) => trim().isEmpty ? fallback : this;
-}
+      fg: const
