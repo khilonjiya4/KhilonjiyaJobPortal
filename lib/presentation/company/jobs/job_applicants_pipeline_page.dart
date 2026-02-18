@@ -1,13 +1,7 @@
-// File: lib/presentation/company/jobs/job_applicants_pipeline_page.dart
-
-import 'dart:math';
-
-import 'package:cached_network_image/cached_network_image.dart';
+// lib/presentation/company/jobs/job_applicants_pipeline_page.dart
 import 'package:flutter/material.dart';
-import 'package:sizer/sizer.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/ui/khilonjiya_ui.dart';
 import '../../../services/employer_applicants_service.dart';
 
 class JobApplicantsPipelinePage extends StatefulWidget {
@@ -27,249 +21,397 @@ class JobApplicantsPipelinePage extends StatefulWidget {
 
 class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
   final EmployerApplicantsService _service = EmployerApplicantsService();
-  final SupabaseClient _client = Supabase.instance.client;
 
   bool _loading = true;
-  String? _error;
+  bool _moving = false;
 
-  // stages: [{id, stage_key, stage_name, sort_order}]
   List<Map<String, dynamic>> _stages = [];
-
-  // all rows from job_applications_listings
   List<Map<String, dynamic>> _rows = [];
 
-  // ------------------------------------------------------------
-  // storage config (same bucket)
-  // ------------------------------------------------------------
-  static const String _bucketJobFiles = 'job-files';
-  static const int _signedUrlExpirySeconds = 60 * 60;
+  // stageId -> listing rows
+  final Map<String, List<Map<String, dynamic>>> _stageBuckets = {};
 
-  // ------------------------------------------------------------
-  // palette
-  // ------------------------------------------------------------
-  static const _bg = Color(0xFFF6F7FB);
-  static const _text = Color(0xFF0F172A);
-  static const _muted = Color(0xFF64748B);
-  static const _line = Color(0xFFE6EAF2);
-  static const _primary = Color(0xFF2563EB);
+  // UI
+  static const Color _bg = Color(0xFFF7F8FA);
+  static const Color _border = Color(0xFFE6E8EC);
+  static const Color _text = Color(0xFF111827);
+  static const Color _muted = Color(0xFF6B7280);
+  static const Color _primary = Color(0xFF2563EB);
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadAll();
   }
 
-  // ------------------------------------------------------------
-  // storage signed url
-  // ------------------------------------------------------------
-  bool _looksLikeHttpUrl(String s) {
-    final v = s.trim().toLowerCase();
-    return v.startsWith('http://') || v.startsWith('https://');
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg)),
+    );
   }
 
-  Future<String> _toSignedUrlIfNeeded(String raw) async {
-    final v = raw.trim();
-    if (v.isEmpty) return '';
-    if (_looksLikeHttpUrl(v)) return v;
+  Future<void> _loadAll() async {
+    if (!mounted) return;
+    setState(() => _loading = true);
 
     try {
-      final signed =
-          await _client.storage.from(_bucketJobFiles).createSignedUrl(
-                v,
-                _signedUrlExpirySeconds,
-              );
-      return signed;
-    } catch (_) {
-      return v;
-    }
-  }
-
-  // ------------------------------------------------------------
-  // load
-  // ------------------------------------------------------------
-  Future<void> _load() async {
-    try {
-      if (!mounted) return;
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
-
       await _service.ensureJobOwner(widget.jobId);
 
-      final stages = await _service.getCompanyPipelineStages(
+      _stages = await _service.getCompanyPipelineStages(
         companyId: widget.companyId,
       );
 
-      // fallback if stages empty
-      if (stages.isEmpty) {
+      // Ensure at least 1 stage
+      if (_stages.isEmpty) {
+        // fallback virtual stage
         _stages = [
           {
             'id': 'applied',
-            'stage_key': 'applied',
             'stage_name': 'Applied',
-            'sort_order': 1,
-          },
-          {
-            'id': 'shortlisted',
-            'stage_key': 'shortlisted',
-            'stage_name': 'Shortlisted',
-            'sort_order': 2,
-          },
-          {
-            'id': 'interview',
-            'stage_key': 'interview',
-            'stage_name': 'Interview',
-            'sort_order': 3,
-          },
-          {
-            'id': 'hired',
-            'stage_key': 'hired',
-            'stage_name': 'Hired',
-            'sort_order': 4,
-          },
-          {
-            'id': 'rejected',
-            'stage_key': 'rejected',
-            'stage_name': 'Rejected',
-            'sort_order': 5,
-          },
+            'stage_order': 1,
+            'is_default': true,
+          }
         ];
-      } else {
-        _stages = stages;
       }
 
-      // IMPORTANT:
-      // keep stage list sorted by sort_order
-      _stages.sort((a, b) {
-        final ao = _toInt(a['sort_order']);
-        final bo = _toInt(b['sort_order']);
-        return ao.compareTo(bo);
-      });
+      _rows = await _service.fetchApplicantsForJob(widget.jobId);
 
-      final rows = await _service.fetchApplicantsForJob(widget.jobId);
-
-      // sign urls for UI
-      for (final row in rows) {
-        final app = row['job_applications'];
-        if (app is! Map) continue;
-
-        final resumeRaw = (app['resume_file_url'] ?? '').toString().trim();
-        final photoRaw = (app['photo_file_url'] ?? '').toString().trim();
-
-        if (resumeRaw.isNotEmpty) {
-          app['resume_file_url'] = await _toSignedUrlIfNeeded(resumeRaw);
-        }
-        if (photoRaw.isNotEmpty) {
-          app['photo_file_url'] = await _toSignedUrlIfNeeded(photoRaw);
-        }
-      }
-
-      if (!mounted) return;
-      setState(() {
-        _rows = rows;
-        _loading = false;
-      });
+      _rebuildBuckets();
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = e.toString();
-      });
+      _stages = [];
+      _rows = [];
+      _stageBuckets.clear();
+      _toast("Failed: ${e.toString()}");
     }
+
+    if (!mounted) return;
+    setState(() => _loading = false);
   }
 
-  // ------------------------------------------------------------
-  // group rows by stage
-  // ------------------------------------------------------------
-  List<Map<String, dynamic>> _rowsForStage(String stageId) {
-    final appliedStageId = _appliedStageId();
+  void _rebuildBuckets() {
+    _stageBuckets.clear();
 
-    return _rows.where((r) {
-      final v = (r['pipeline_stage_id'] ?? '').toString().trim();
+    // init empty
+    for (final s in _stages) {
+      final id = (s['id'] ?? '').toString();
+      if (id.trim().isEmpty) continue;
+      _stageBuckets[id] = [];
+    }
 
-      // if pipeline_stage_id not set, treat as applied
-      if (v.isEmpty) {
-        return stageId == appliedStageId;
+    // Put rows into stage based on employer_notes tag
+    for (final r in _rows) {
+      final notes = r['employer_notes'];
+      final stageId = _service.extractStageId(notes);
+
+      String finalStageId = stageId;
+
+      if (finalStageId.trim().isEmpty) {
+        // default stage
+        final def = _stages.firstWhere(
+          (x) => x['is_default'] == true,
+          orElse: () => _stages.first,
+        );
+        finalStageId = (def['id'] ?? '').toString();
       }
 
-      return v == stageId;
-    }).toList();
-  }
+      if (_stageBuckets[finalStageId] == null) {
+        // stage not found -> push to first stage
+        finalStageId = (_stages.first['id'] ?? '').toString();
+      }
 
-  String _appliedStageId() {
-    if (_stages.isEmpty) return 'applied';
-
-    // try find stage_key=applied
-    final idx = _stages.indexWhere((s) {
-      return (s['stage_key'] ?? '').toString().toLowerCase().trim() == 'applied';
-    });
-
-    if (idx != -1) return _stages[idx]['id'].toString();
-
-    // fallback: first stage
-    return _stages.first['id'].toString();
-  }
-
-  // ------------------------------------------------------------
-  // actions
-  // ------------------------------------------------------------
-  Future<void> _openUrl(String url) async {
-    final u = url.trim();
-    if (u.isEmpty) return;
-
-    final uri = Uri.tryParse(u);
-    if (uri == null) return;
-
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      _stageBuckets[finalStageId]!.add(r);
     }
   }
 
-  Future<void> _call(String phone) async {
-    final p = phone.trim();
-    if (p.isEmpty) return;
-
-    final uri = Uri.parse("tel:$p");
-    if (await canLaunchUrl(uri)) await launchUrl(uri);
-  }
-
-  Future<void> _email(String email) async {
-    final e = email.trim();
-    if (e.isEmpty) return;
-
-    final uri = Uri.parse("mailto:$e");
-    if (await canLaunchUrl(uri)) await launchUrl(uri);
-  }
-
   // ------------------------------------------------------------
-  // move
+  // MOVE APPLICANT
   // ------------------------------------------------------------
-  Future<void> _move({
-    required String listingRowId,
-    required String? fromStageId,
+  Future<void> _moveToStage({
+    required Map<String, dynamic> row,
     required String toStageId,
   }) async {
+    if (_moving) return;
+
+    final listingRowId = (row['id'] ?? '').toString();
+    if (listingRowId.trim().isEmpty) return;
+
+    setState(() => _moving = true);
+
     try {
       await _service.moveApplicantToStage(
         listingRowId: listingRowId,
         jobId: widget.jobId,
-        fromStageId: fromStageId,
         toStageId: toStageId,
       );
 
-      await _load();
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Failed to move applicant")),
+      // Update local row notes
+      final existingNotes = (row['employer_notes'] ?? '').toString();
+      final updatedNotes =
+          '[pipeline_stage_id:$toStageId]\n$existingNotes'.trim();
+
+      row['employer_notes'] = updatedNotes;
+
+      _rebuildBuckets();
+      setState(() {});
+    } catch (e) {
+      _toast("Move failed: ${e.toString()}");
+    }
+
+    if (!mounted) return;
+    setState(() => _moving = false);
+  }
+
+  // ------------------------------------------------------------
+  // OPEN APPLICANT DETAILS
+  // ------------------------------------------------------------
+  void _openApplicant(Map<String, dynamic> row) {
+    final app = (row['job_applications'] ?? {}) as Map;
+
+    final name = (app['name'] ?? 'Candidate').toString();
+    final phone = (app['phone'] ?? '').toString();
+    final email = (app['email'] ?? '').toString();
+    final district = (app['district'] ?? '').toString();
+    final edu = (app['education'] ?? '').toString();
+    final exp = (app['experience_level'] ?? '').toString();
+    final skills = (app['skills'] ?? '').toString();
+    final salary = (app['expected_salary'] ?? '').toString();
+
+    final resume = (app['resume_file_url'] ?? '').toString();
+    final photo = (app['photo_file_url'] ?? '').toString();
+
+    final notes = (row['employer_notes'] ?? '').toString();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (_) {
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              16,
+              16,
+              MediaQuery.of(context).viewInsets.bottom + 16,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      _avatar(name, photo),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          name,
+                          style: const TextStyle(
+                            fontSize: 16.5,
+                            fontWeight: FontWeight.w900,
+                            color: _text,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+
+                  _kv("Phone", phone.isEmpty ? "Not provided" : phone),
+                  _kv("Email", email.isEmpty ? "Not provided" : email),
+                  _kv("District", district.isEmpty ? "Not provided" : district),
+                  _kv("Education", edu.isEmpty ? "Not provided" : edu),
+                  _kv("Experience", exp.isEmpty ? "Not provided" : exp),
+                  _kv("Expected Salary",
+                      salary.isEmpty ? "Not provided" : salary),
+
+                  const SizedBox(height: 12),
+
+                  Text(
+                    "Skills",
+                    style: KhilonjiyaUI.hTitle.copyWith(fontSize: 14),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    skills.isEmpty ? "Not provided" : skills,
+                    style: KhilonjiyaUI.body.copyWith(
+                      color: const Color(0xFF475569),
+                      height: 1.45,
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: resume.isEmpty
+                              ? null
+                              : () {
+                                  _toast("Resume open will be added next");
+                                },
+                          icon: const Icon(Icons.description_outlined, size: 18),
+                          label: const Text(
+                            "Resume",
+                            style: TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _text,
+                            backgroundColor: const Color(0xFFF8FAFC),
+                            side: const BorderSide(color: _border),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _editNotes(row, notes),
+                          icon: const Icon(Icons.edit_note_rounded, size: 20),
+                          label: const Text(
+                            "Notes",
+                            style: TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _primary,
+                            backgroundColor: const Color(0xFFEFF6FF),
+                            side: const BorderSide(color: Color(0xFFBFDBFE)),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  Text(
+                    "Move to Stage",
+                    style: KhilonjiyaUI.hTitle.copyWith(fontSize: 14),
+                  ),
+                  const SizedBox(height: 10),
+
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: _stages.map((s) {
+                      final id = (s['id'] ?? '').toString();
+                      final stageName = (s['stage_name'] ?? '').toString();
+
+                      return InkWell(
+                        onTap: _moving
+                            ? null
+                            : () async {
+                                Navigator.pop(context);
+                                await _moveToStage(row: row, toStageId: id);
+                              },
+                        borderRadius: BorderRadius.circular(999),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 9,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: _border),
+                          ),
+                          child: Text(
+                            stageName,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              color: _text,
+                              fontSize: 12.5,
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+
+                  const SizedBox(height: 16),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ------------------------------------------------------------
+  // EDIT NOTES (REAL)
+  // ------------------------------------------------------------
+  Future<void> _editNotes(Map<String, dynamic> row, String existing) async {
+    final c = TextEditingController(text: existing);
+
+    final listingRowId = (row['id'] ?? '').toString();
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) {
+        return AlertDialog(
+          title: const Text("Employer Notes"),
+          content: TextField(
+            controller: c,
+            maxLines: 6,
+            decoration: const InputDecoration(
+              hintText: "Write private notes for your team...",
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _primary,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text("Save"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (ok != true) return;
+
+    try {
+      await _service.updateEmployerNotes(
+        listingRowId: listingRowId,
+        jobId: widget.jobId,
+        notes: c.text.trim(),
       );
+
+      row['employer_notes'] = c.text.trim();
+      _rebuildBuckets();
+      setState(() {});
+      _toast("Saved");
+    } catch (e) {
+      _toast("Failed: ${e.toString()}");
     }
   }
 
   // ------------------------------------------------------------
-  // UI
+  // BUILD
   // ------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
@@ -277,77 +419,84 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
       backgroundColor: _bg,
       appBar: AppBar(
         backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
-        elevation: 0.6,
-        title: const Text(
-          "Applicants Pipeline",
-          style: TextStyle(
-            fontWeight: FontWeight.w900,
-            color: _text,
-            letterSpacing: -0.2,
-          ),
-        ),
-        iconTheme: const IconThemeData(color: _text),
+        foregroundColor: _text,
+        elevation: 0.7,
+        title: const Text("Applicants Pipeline"),
         actions: [
           IconButton(
-            onPressed: _load,
+            onPressed: _moving ? null : _loadAll,
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? _errorState()
-              : _pipeline(),
+          : _stages.isEmpty
+              ? Center(
+                  child: Text(
+                    "No pipeline stages found.",
+                    style: KhilonjiyaUI.body,
+                  ),
+                )
+              : _buildBoard(),
     );
   }
 
-  Widget _pipeline() {
-    if (_stages.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: EdgeInsets.all(7.w),
-          child: const Text(
-            "No pipeline stages found.",
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              color: _muted,
+  Widget _buildBoard() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      children: [
+        if (_moving)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEFF6FF),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFBFDBFE)),
+            ),
+            child: const Row(
+              children: [
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    "Updating pipeline...",
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      color: _primary,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-        ),
-      );
-    }
+        if (_moving) const SizedBox(height: 12),
 
-    return ListView(
-      padding: EdgeInsets.fromLTRB(4.w, 1.2.h, 4.w, 3.h),
-      children: [
-        const Text(
-          "Drag a candidate card into another stage.",
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            color: _muted,
-          ),
-        ),
-        SizedBox(height: 1.4.h),
+        // Horizontal board
         SizedBox(
-          height: 78.h,
+          height: MediaQuery.of(context).size.height - 180,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: _stages.length,
-            separatorBuilder: (_, __) => SizedBox(width: 3.w),
-            itemBuilder: (context, index) {
-              final s = _stages[index];
-              final stageId = s['id'].toString();
-              final stageName = (s['stage_name'] ?? 'Stage').toString();
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (_, i) {
+              final stage = _stages[i];
+              final stageId = (stage['id'] ?? '').toString();
+              final stageName = (stage['stage_name'] ?? '').toString();
 
-              final items = _rowsForStage(stageId);
+              final list = _stageBuckets[stageId] ?? [];
 
-              return _stageColumn(
-                stageId: stageId,
-                title: stageName,
-                count: items.length,
-                items: items,
+              return SizedBox(
+                width: 320,
+                child: _stageColumn(
+                  stageId: stageId,
+                  stageName: stageName,
+                  rows: list,
+                ),
               );
             },
           ),
@@ -358,397 +507,231 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
 
   Widget _stageColumn({
     required String stageId,
-    required String title,
-    required int count,
-    required List<Map<String, dynamic>> items,
+    required String stageName,
+    required List<Map<String, dynamic>> rows,
   }) {
     return Container(
-      width: 78.w,
-      padding: EdgeInsets.fromLTRB(3.5.w, 1.4.h, 3.5.w, 1.2.h),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _line),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _border),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // header
           Row(
             children: [
               Expanded(
                 child: Text(
-                  title,
+                  stageName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
+                    fontSize: 14.5,
                     fontWeight: FontWeight.w900,
-                    fontSize: 15.5,
                     color: _text,
                   ),
                 ),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFFF1F5F9),
                   borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: _line),
+                  border: Border.all(color: _border),
                 ),
                 child: Text(
-                  "$count",
+                  rows.length.toString(),
                   style: const TextStyle(
                     fontWeight: FontWeight.w900,
-                    color: _text,
+                    color: _muted,
+                    fontSize: 12,
                   ),
                 ),
               ),
-            ],
-          ),
-          SizedBox(height: 1.2.h),
-
-          Expanded(
-            child: DragTarget<Map<String, dynamic>>(
-              onWillAccept: (data) => data != null,
-              onAccept: (data) async {
-                final listingRowId = data['id'].toString();
-
-                final fromStageId =
-                    (data['pipeline_stage_id'] ?? '').toString().trim();
-
-                final actualFrom =
-                    fromStageId.isEmpty ? _appliedStageId() : fromStageId;
-
-                if (actualFrom == stageId) return;
-
-                await _move(
-                  listingRowId: listingRowId,
-                  fromStageId: actualFrom,
-                  toStageId: stageId,
-                );
-              },
-              builder: (context, candidateData, rejectedData) {
-                final highlight = candidateData.isNotEmpty;
-
-                return AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
-                  decoration: BoxDecoration(
-                    color: highlight
-                        ? const Color(0xFFEFF6FF)
-                        : const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: highlight ? const Color(0xFFBFDBFE) : _line,
-                      width: highlight ? 1.6 : 1,
-                    ),
-                  ),
-                  child: items.isEmpty
-                      ? Center(
-                          child: Text(
-                            "Drop here",
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              color: _muted.withOpacity(0.85),
-                            ),
-                          ),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.all(10),
-                          itemCount: items.length,
-                          itemBuilder: (context, i) {
-                            final row = items[i];
-                            return _draggableApplicantCard(row);
-                          },
-                        ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _draggableApplicantCard(Map<String, dynamic> row) {
-    return Draggable<Map<String, dynamic>>(
-      data: row,
-      feedback: Material(
-        color: Colors.transparent,
-        child: SizedBox(
-          width: 70.w,
-          child: Opacity(
-            opacity: 0.92,
-            child: _applicantCard(row, isDragging: true),
-          ),
-        ),
-      ),
-      childWhenDragging: Opacity(
-        opacity: 0.35,
-        child: _applicantCard(row),
-      ),
-      child: _applicantCard(row),
-    );
-  }
-
-  Widget _applicantCard(Map<String, dynamic> row, {bool isDragging = false}) {
-    final app = (row['job_applications'] ?? {}) as Map<String, dynamic>;
-
-    final name = (app['name'] ?? '').toString().trim().ifEmpty("Candidate");
-    final phone = (app['phone'] ?? '').toString().trim();
-    final email = (app['email'] ?? '').toString().trim();
-
-    final resumeUrl = (app['resume_file_url'] ?? '').toString().trim();
-    final photoUrl = (app['photo_file_url'] ?? '').toString().trim();
-
-    final district = (app['district'] ?? '').toString().trim();
-    final education = (app['education'] ?? '').toString().trim();
-    final exp = (app['experience_level'] ?? '').toString().trim();
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _line),
-        boxShadow: isDragging
-            ? [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.06),
-                  blurRadius: 16,
-                  offset: const Offset(0, 10),
-                )
-              ]
-            : [],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _avatar(photoUrl, name),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w900,
-                    color: _text,
-                    fontSize: 14.6,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (district.isNotEmpty) _pillText(district),
-              if (education.isNotEmpty) _pillText(education),
-              if (exp.isNotEmpty) _pillText(exp),
             ],
           ),
 
           const SizedBox(height: 10),
+          const Divider(height: 1, color: _border),
+          const SizedBox(height: 10),
 
-          Row(
-            children: [
-              Expanded(
-                child: _miniAction(
-                  icon: Icons.call_rounded,
-                  label: "Call",
-                  onTap: phone.isEmpty ? null : () => _call(phone),
+          if (rows.isEmpty)
+            Expanded(
+              child: Center(
+                child: Text(
+                  "No applicants",
+                  style: KhilonjiyaUI.sub.copyWith(color: _muted),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _miniAction(
-                  icon: Icons.mail_rounded,
-                  label: "Email",
-                  onTap: email.isEmpty ? null : () => _email(email),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _miniAction(
-                  icon: Icons.picture_as_pdf_rounded,
-                  label: "Resume",
-                  onTap: resumeUrl.isEmpty ? null : () => _openUrl(resumeUrl),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _avatar(String photoUrl, String name) {
-    if (photoUrl.trim().isEmpty) {
-      final letter = name.trim().isEmpty ? 'C' : name.trim()[0].toUpperCase();
-      final color = Colors.primaries[
-          Random(name.hashCode).nextInt(Colors.primaries.length)];
-
-      return Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.10),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: _line),
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          letter,
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w900,
-            color: color,
-          ),
-        ),
-      );
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: CachedNetworkImage(
-        imageUrl: photoUrl,
-        width: 42,
-        height: 42,
-        fit: BoxFit.cover,
-        placeholder: (_, __) => Container(
-          width: 42,
-          height: 42,
-          color: const Color(0xFFF1F5F9),
-          child: const Center(
-            child: SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-          ),
-        ),
-        errorWidget: (_, __, ___) => Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: const Color(0xFFFFF1F2),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFFECACA)),
-          ),
-          child: const Icon(
-            Icons.error_outline_rounded,
-            color: Color(0xFF9F1239),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _miniAction({
-    required IconData icon,
-    required String label,
-    required VoidCallback? onTap,
-  }) {
-    final disabled = onTap == null;
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        decoration: BoxDecoration(
-          color: disabled ? const Color(0xFFF1F5F9) : const Color(0xFFEFF6FF),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: disabled ? _line : const Color(0xFFDBEAFE),
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              size: 16,
-              color: disabled ? const Color(0xFF94A3B8) : _primary,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontWeight: FontWeight.w900,
-                fontSize: 12.2,
-                color: disabled ? const Color(0xFF94A3B8) : _primary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _pillText(String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _line),
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          fontWeight: FontWeight.w800,
-          color: Color(0xFF334155),
-          fontSize: 12.3,
-        ),
-      ),
-    );
-  }
-
-  int _toInt(dynamic v) {
-    if (v == null) return 0;
-    if (v is int) return v;
-    if (v is double) return v.toInt();
-    return int.tryParse(v.toString()) ?? 0;
-  }
-
-  Widget _errorState() {
-    return Center(
-      child: Padding(
-        padding: EdgeInsets.all(7.w),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline_rounded,
-                size: 42, color: Color(0xFF9F1239)),
-            const SizedBox(height: 14),
-            Text(
-              _error ?? "Failed",
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontWeight: FontWeight.w900,
-                color: _text,
-              ),
-            ),
-            const SizedBox(height: 14),
-            OutlinedButton.icon(
-              onPressed: _load,
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text(
-                "Try Again",
-                style: TextStyle(fontWeight: FontWeight.w900),
               ),
             )
+          else
+            Expanded(
+              child: ListView.builder(
+                itemCount: rows.length,
+                itemBuilder: (_, i) => _applicantCard(rows[i], stageId),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _applicantCard(Map<String, dynamic> row, String currentStageId) {
+    final app = (row['job_applications'] ?? {}) as Map;
+
+    final name = (app['name'] ?? 'Candidate').toString();
+    final district = (app['district'] ?? '').toString();
+    final exp = (app['experience_level'] ?? '').toString();
+    final salary = (app['expected_salary'] ?? '').toString();
+
+    final photo = (app['photo_file_url'] ?? '').toString();
+
+    return InkWell(
+      onTap: () => _openApplicant(row),
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: _border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                _avatar(name, photo, size: 42),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      color: _text,
+                    ),
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  onSelected: (toStageId) async {
+                    if (toStageId == currentStageId) return;
+                    await _moveToStage(row: row, toStageId: toStageId);
+                  },
+                  itemBuilder: (_) {
+                    return _stages.map((s) {
+                      final id = (s['id'] ?? '').toString();
+                      final stageName = (s['stage_name'] ?? '').toString();
+
+                      return PopupMenuItem(
+                        value: id,
+                        child: Text(stageName),
+                      );
+                    }).toList();
+                  },
+                  child: const Icon(Icons.more_vert_rounded, color: _muted),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            if (district.isNotEmpty)
+              _miniRow(Icons.location_on_outlined, district),
+
+            if (exp.isNotEmpty)
+              _miniRow(Icons.timeline_outlined, exp),
+
+            if (salary.isNotEmpty)
+              _miniRow(Icons.currency_rupee_rounded, salary),
           ],
         ),
       ),
     );
   }
-}
 
-extension _StringExt on String {
-  String ifEmpty(String fallback) => trim().isEmpty ? fallback : this;
+  Widget _miniRow(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: _muted),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+                color: _muted,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _kv(String k, String v) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 120,
+            child: Text(
+              k,
+              style: const TextStyle(
+                fontWeight: FontWeight.w900,
+                color: _muted,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              v,
+              style: const TextStyle(
+                fontWeight: FontWeight.w800,
+                color: _text,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _avatar(String name, String photoUrl, {double size = 52}) {
+    final letter = name.isNotEmpty ? name[0].toUpperCase() : "C";
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFBFDBFE)),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        letter,
+        style: TextStyle(
+          fontSize: size * 0.34,
+          fontWeight: FontWeight.w900,
+          color: _primary,
+        ),
+      ),
+    );
+  }
 }
