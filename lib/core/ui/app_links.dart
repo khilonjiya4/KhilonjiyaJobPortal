@@ -11,12 +11,16 @@ class AppLinks {
   // ------------------------------------------------------------
   static const String websiteBase = ''; // e.g. https://khilonjiya.in
 
+  // You used websiteUrl in About page
+  static const String websiteUrl = websiteBase;
+
   // ------------------------------------------------------------
   // LEGAL (future URLs)
   // ------------------------------------------------------------
   static const String privacyPolicyUrl = '';
   static const String termsUrl = '';
-  static const String refundsUrl = '';
+  static const String refundPolicyUrl = ''; // ✅ FIXED NAME
+  static const String contactSupportUrl = '';
 
   // ------------------------------------------------------------
   // SUPPORT
@@ -24,7 +28,6 @@ class AppLinks {
   static const String supportEmail = 'support@khilonjiya.in';
   static const String supportPhone = ''; // optional later
   static const String supportWhatsapp = ''; // optional later
-  static const String contactSupportUrl = ''; // optional later (website page)
 
   // ------------------------------------------------------------
   // PLAY STORE
