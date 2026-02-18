@@ -35,7 +35,7 @@ import '../presentation/company/jobs/job_applicants_screen.dart';
 // PIPELINE
 import '../presentation/company/jobs/job_applicants_pipeline_page.dart';
 
-// ✅ NEW: EMPLOYER NOTIFICATIONS
+// EMPLOYER NOTIFICATIONS
 import '../presentation/company/notifications/employer_notifications_page.dart';
 
 class AppRoutes {
@@ -93,13 +93,15 @@ class AppRoutes {
   static const String employerJobs = '/employer-jobs';
   static const String createJob = '/create-job';
 
-  // Requires argument: jobId (String)
+  // Requires arguments: { jobId, companyId }
   static const String jobApplicants = '/job-applicants';
 
   // Requires arguments: { jobId, companyId }
   static const String jobApplicantsPipeline = '/job-applicants-pipeline';
 
-  // ✅ NEW
+  // ------------------------------------------------------------
+  // EMPLOYER NOTIFICATIONS
+  // ------------------------------------------------------------
   static const String employerNotifications = '/employer-notifications';
 
   // ------------------------------------------------------------
@@ -148,20 +150,36 @@ class AppRoutes {
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
       case jobApplicants:
-        final jobId = settings.arguments;
+        final args = settings.arguments;
 
-        if (jobId == null || jobId is! String || jobId.trim().isEmpty) {
+        if (args == null || args is! Map) {
           return MaterialPageRoute(
             builder: (_) => const Scaffold(
               body: Center(
-                child: Text("Job ID missing for applicants screen"),
+                child: Text("Missing arguments for applicants screen"),
+              ),
+            ),
+          );
+        }
+
+        final jobId = (args['jobId'] ?? '').toString();
+        final companyId = (args['companyId'] ?? '').toString();
+
+        if (jobId.trim().isEmpty || companyId.trim().isEmpty) {
+          return MaterialPageRoute(
+            builder: (_) => const Scaffold(
+              body: Center(
+                child: Text("jobId/companyId missing for applicants screen"),
               ),
             ),
           );
         }
 
         return MaterialPageRoute(
-          builder: (_) => JobApplicantsScreen(jobId: jobId),
+          builder: (_) => JobApplicantsScreen(
+            jobId: jobId,
+            companyId: companyId,
+          ),
         );
 
       case jobApplicantsPipeline:
