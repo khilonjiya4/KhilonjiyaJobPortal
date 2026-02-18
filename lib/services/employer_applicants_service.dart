@@ -14,12 +14,12 @@ class EmployerApplicantsService {
   // ------------------------------------------------------------
   // SECURITY: ensure current user owns the job
   // ------------------------------------------------------------
-  Future<void> ensureJobOwner(String jobId) async {
+  Future<Map<String, dynamic>> ensureJobOwnerAndGetJob(String jobId) async {
     final user = _requireUser();
 
     final job = await _db
         .from('job_listings')
-        .select('id, employer_id')
+        .select('id, employer_id, company_id, job_title')
         .eq('id', jobId)
         .maybeSingle();
 
@@ -29,10 +29,12 @@ class EmployerApplicantsService {
     if (employerId != user.id) {
       throw Exception("Not allowed to access applicants for this job");
     }
+
+    return Map<String, dynamic>.from(job);
   }
 
   // ------------------------------------------------------------
-  // PIPELINE STAGES
+  // PIPELINE STAGES (REAL)
   // ------------------------------------------------------------
   Future<List<Map<String, dynamic>>> getCompanyPipelineStages({
     required String companyId,
@@ -49,7 +51,7 @@ class EmployerApplicantsService {
   }
 
   // ------------------------------------------------------------
-  // FETCH APPLICANTS FOR JOB
+  // LOAD APPLICANTS FOR JOB (REAL)
   // ------------------------------------------------------------
   Future<List<Map<String, dynamic>>> fetchApplicantsForJob(String jobId) async {
     _requireUser();
@@ -97,15 +99,166 @@ class EmployerApplicantsService {
   }
 
   // ------------------------------------------------------------
-  // MOVE APPLICANT TO A PIPELINE STAGE
-  // We store stage_id in employer_notes JSON (since schema doesn't have pipeline_stage_id)
-  //
-  // IMPORTANT:
-  // Your schema for job_applications_listings does NOT have pipeline_stage_id.
-  // So we store stage_id in employer_notes as JSON:
-  // { "pipeline_stage_id": "...", "note": "..." }
-  //
-  // This keeps it working without DB migration.
+  // MARK VIEWED (REAL)
+  // ------------------------------------------------------------
+  Future<void> markViewed({
+    required String listingRowId,
+    required String jobId,
+  }) async {
+    final user = _requireUser();
+    await ensureJobOwnerAndGetJob(jobId);
+
+    // Only upgrade applied -> viewed
+    final row = await _db
+        .from('job_applications_listings')
+        .select('id, application_status')
+        .eq('id', listingRowId)
+        .maybeSingle();
+
+    if (row == null) return;
+
+    final s = (row['application_status'] ?? 'applied').toString().toLowerCase();
+    if (s != 'applied') return;
+
+    await _db.from('job_applications_listings').update({
+      'application_status': 'viewed',
+    }).eq('id', listingRowId);
+
+    try {
+      await _db.from('application_events').insert({
+        'job_application_listing_id': listingRowId,
+        'event_type': 'viewed',
+        'actor_user_id': user.id,
+        'notes': 'Employer viewed application',
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (_) {}
+  }
+
+  // ------------------------------------------------------------
+  // UPDATE STATUS (REAL)
+  // ------------------------------------------------------------
+  Future<void> updateApplicationStatus({
+    required String listingRowId,
+    required String jobId,
+    required String status, // shortlisted, rejected, selected, interviewed
+    String? note,
+  }) async {
+    final user = _requireUser();
+    await ensureJobOwnerAndGetJob(jobId);
+
+    final s = status.trim().toLowerCase();
+    const allowed = {
+      'applied',
+      'viewed',
+      'shortlisted',
+      'interview_scheduled',
+      'interviewed',
+      'selected',
+      'rejected',
+    };
+    if (!allowed.contains(s)) {
+      throw Exception("Invalid status: $status");
+    }
+
+    await _db.from('job_applications_listings').update({
+      'application_status': s,
+      if ((note ?? '').trim().isNotEmpty) 'employer_notes': note!.trim(),
+    }).eq('id', listingRowId);
+
+    try {
+      await _db.from('application_events').insert({
+        'job_application_listing_id': listingRowId,
+        'event_type': 'status_changed',
+        'actor_user_id': user.id,
+        'notes': 'Changed status to $s',
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (_) {}
+  }
+
+  // ------------------------------------------------------------
+  // SCHEDULE INTERVIEW (REAL)
+  // Inserts into interviews table
+  // Updates job_applications_listings.interview_date + status
+  // ------------------------------------------------------------
+  Future<void> scheduleInterview({
+    required String listingRowId,
+    required String jobId,
+    required String companyId,
+    required DateTime scheduledAt,
+    int durationMinutes = 30,
+    String interviewType = 'video', // your enum default is 'video'
+    String? meetingLink,
+    String? locationAddress,
+    String? notes,
+  }) async {
+    final user = _requireUser();
+    await ensureJobOwnerAndGetJob(jobId);
+
+    // Insert interview
+    await _db.from('interviews').insert({
+      'job_application_listing_id': listingRowId,
+      'company_id': companyId,
+      'round_number': 1,
+      'interview_type': interviewType,
+      'scheduled_at': scheduledAt.toIso8601String(),
+      'duration_minutes': durationMinutes,
+      'meeting_link': (meetingLink ?? '').trim().isEmpty ? null : meetingLink,
+      'location_address':
+          (locationAddress ?? '').trim().isEmpty ? null : locationAddress,
+      'notes': (notes ?? '').trim().isEmpty ? null : notes,
+      'created_by': user.id,
+    });
+
+    // Update listing row
+    await _db.from('job_applications_listings').update({
+      'interview_date': scheduledAt.toIso8601String(),
+      'application_status': 'interview_scheduled',
+    }).eq('id', listingRowId);
+
+    try {
+      await _db.from('application_events').insert({
+        'job_application_listing_id': listingRowId,
+        'event_type': 'interview_scheduled',
+        'actor_user_id': user.id,
+        'notes': 'Interview scheduled',
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (_) {}
+  }
+
+  // ------------------------------------------------------------
+  // EMPLOYER NOTES (REAL)
+  // ------------------------------------------------------------
+  Future<void> updateEmployerNotes({
+    required String listingRowId,
+    required String jobId,
+    required String notes,
+  }) async {
+    final user = _requireUser();
+    await ensureJobOwnerAndGetJob(jobId);
+
+    await _db.from('job_applications_listings').update({
+      'employer_notes': notes.trim(),
+    }).eq('id', listingRowId);
+
+    try {
+      await _db.from('application_events').insert({
+        'job_application_listing_id': listingRowId,
+        'event_type': 'note_updated',
+        'actor_user_id': user.id,
+        'notes': 'Employer updated notes',
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (_) {}
+  }
+
+  // ------------------------------------------------------------
+  // PIPELINE STAGE (WORKAROUND)
+  // Your schema has no pipeline_stage_id column.
+  // So we store stage in employer_notes as:
+  // [pipeline_stage_id:<uuid>]
   // ------------------------------------------------------------
   Future<void> moveApplicantToStage({
     required String listingRowId,
@@ -114,11 +267,8 @@ class EmployerApplicantsService {
     String? note,
   }) async {
     final user = _requireUser();
+    await ensureJobOwnerAndGetJob(jobId);
 
-    // Verify owner
-    await ensureJobOwner(jobId);
-
-    // Fetch current employer_notes so we don't overwrite
     final row = await _db
         .from('job_applications_listings')
         .select('id, employer_notes')
@@ -129,8 +279,6 @@ class EmployerApplicantsService {
 
     final existingNotes = (row['employer_notes'] ?? '').toString().trim();
 
-    // Save pipeline stage inside employer_notes JSON-like string
-    // (Simple safe format: stage:<uuid>)
     final newNotes = _mergeNotes(
       existingNotes: existingNotes,
       stageId: toStageId,
@@ -141,7 +289,7 @@ class EmployerApplicantsService {
       'employer_notes': newNotes,
     }).eq('id', listingRowId);
 
-    // Stage history
+    // stage history
     try {
       await _db.from('application_stage_history').insert({
         'job_application_listing_id': listingRowId,
@@ -153,7 +301,7 @@ class EmployerApplicantsService {
       if (kDebugMode) debugPrint("stage_history insert failed: $e");
     }
 
-    // Event log
+    // event
     try {
       await _db.from('application_events').insert({
         'job_application_listing_id': listingRowId,
@@ -165,62 +313,21 @@ class EmployerApplicantsService {
     } catch (_) {}
   }
 
-  // ------------------------------------------------------------
-  // SAVE EMPLOYER NOTE
-  // ------------------------------------------------------------
-  Future<void> updateEmployerNotes({
-    required String listingRowId,
-    required String jobId,
-    required String notes,
-  }) async {
-    _requireUser();
-    await ensureJobOwner(jobId);
-
-    await _db.from('job_applications_listings').update({
-      'employer_notes': notes.trim(),
-    }).eq('id', listingRowId);
-
-    try {
-      final user = _db.auth.currentUser;
-      await _db.from('application_events').insert({
-        'job_application_listing_id': listingRowId,
-        'event_type': 'note_updated',
-        'actor_user_id': user?.id,
-        'notes': 'Employer updated notes',
-        'created_at': DateTime.now().toIso8601String(),
-      });
-    } catch (_) {}
-  }
-
-  // ------------------------------------------------------------
-  // INTERNAL: stage stored in notes
-  // ------------------------------------------------------------
   String _mergeNotes({
     required String existingNotes,
     required String stageId,
     String? note,
   }) {
-    // We store as:
-    // [pipeline_stage_id:<uuid>]
-    // <existing text...>
-    // <note line...>
-
     String cleaned = existingNotes;
-
-    // Remove old stage tag
     cleaned = cleaned.replaceAll(RegExp(r'\[pipeline_stage_id:.*?\]\s*'), '');
 
     final tag = '[pipeline_stage_id:$stageId]';
-
     final extra = (note ?? '').trim();
-    if (extra.isEmpty) {
-      return '$tag\n$cleaned'.trim();
-    }
 
+    if (extra.isEmpty) return '$tag\n$cleaned'.trim();
     return '$tag\n$cleaned\n\n$extra'.trim();
   }
 
-  // Extract stage id from employer_notes
   String extractStageId(dynamic employerNotes) {
     if (employerNotes == null) return '';
     final s = employerNotes.toString();
