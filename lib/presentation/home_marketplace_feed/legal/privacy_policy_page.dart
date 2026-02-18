@@ -43,8 +43,12 @@ We may collect the following information depending on how you use the App:
 A) Account & Profile Information
 • Full name
 • Mobile number
-• Email address
+• Email address (optional)
+• Date of birth (if you enter)
+• Gender (if you enter)
+• Address, district, state (if you enter)
 • Education, skills, experience, job preferences
+• Expected salary (if you enter)
 
 B) Uploaded Files
 • Resume (PDF/DOC/DOCX etc.)
@@ -52,14 +56,15 @@ B) Uploaded Files
 
 C) Job Activity Data
 • Jobs viewed, saved, applied, shared
-• Application status history (if applicable)
+• Application details and status history (if applicable)
 
 D) Location Data (Optional)
-• City / State / District you enter
-• Current latitude/longitude only if you provide it (used for “Nearby jobs”)
+• City / District / State you enter
+• Current latitude/longitude only if you allow location permission (used for “Nearby jobs”)
 
 E) Device & Technical Data
-• App usage events, crash logs (if enabled by platform)
+• App usage events
+• Crash logs (if enabled by platform)
 • Basic device information (for security and fraud prevention)
 """,
           ),
@@ -69,10 +74,12 @@ E) Device & Technical Data
             body: """
 We use your information to:
 • Create and manage your account
+• Verify login and prevent misuse
 • Show relevant job listings based on your profile and preferences
 • Enable job applications and allow employers to review applications
+• Provide customer support
 • Improve app performance, safety, and reliability
-• Prevent spam, fraud, and misuse of the platform
+• Prevent spam, fraud, and illegal activity
 """,
           ),
 
@@ -83,14 +90,46 @@ When you apply for a job, the employer may receive and view your application inf
 • Your name and contact details
 • Your education, skills, and experience
 • Your resume file (if uploaded)
+• Your profile photo (if uploaded)
 • Any additional details you submit during application
 
-Employers are responsible for how they handle applicant information once they receive it.
+Important:
+Employers are independent parties. They are responsible for how they store, use, or process applicant information after receiving it.
 """,
           ),
 
           _card(
-            title: "5. Storage & security",
+            title: "5. Payments and subscriptions (if enabled)",
+            body: """
+If the App offers paid subscriptions or paid services, payments may be processed through:
+• Google Play Billing (Android)
+
+We do not store your full card/bank details inside our database.
+
+For transaction verification and subscription access, we may store limited payment metadata such as:
+• Order ID / Transaction ID
+• Purchase time
+• Subscription plan identifier
+• Subscription status (active/expired)
+
+Refund rules are described in the Refund Policy section of the app.
+""",
+          ),
+
+          _card(
+            title: "6. Push notifications (if enabled)",
+            body: """
+If you allow notifications, we may send:
+• Job alerts
+• Application updates
+• Important service messages
+
+You can disable notifications anytime from your phone settings or from in-app settings (when available).
+""",
+          ),
+
+          _card(
+            title: "7. Storage & security",
             body: """
 Your data is stored using Supabase (database + file storage).
 
@@ -98,43 +137,46 @@ We apply security controls such as:
 • Authentication (login required)
 • Row-Level Security (RLS) policies
 • Access restrictions for files stored in buckets
+• Role-based permissions for job seeker and employer data
 
-However, no system can be guaranteed 100% secure. You should protect your account credentials.
+However, no system can be guaranteed 100% secure. You should protect your account credentials and device.
 """,
           ),
 
           _card(
-            title: "6. Sharing of data",
+            title: "8. Sharing of data",
             body: """
 We do not sell your personal data.
 
 We may share information only in the following cases:
 • With employers when you apply for a job
 • With service providers (e.g., Supabase) strictly to operate the App
+• With Google Play / platform services for subscription verification
 • When required by law, regulation, or valid legal process
 • To protect the rights, safety, and security of users and the platform
 """,
           ),
 
           _card(
-            title: "7. Data retention",
+            title: "9. Data retention",
             body: """
 We retain your information as long as:
 • Your account is active, or
 • It is needed to provide services, resolve disputes, enforce policies, or comply with legal requirements.
 
 You may request deletion of your account and associated data.
-Some information may be retained if legally required (e.g., transaction records).
+
+Some information may be retained if legally required (for example, payment and transaction records).
 """,
           ),
 
           _card(
-            title: "8. Your rights and choices",
+            title: "10. Your rights and choices",
             body: """
 You can:
 • View and edit your profile information anytime
 • Replace your resume and profile photo anytime
-• Control what you choose to provide (e.g., location, optional fields)
+• Choose what optional information to provide (e.g., location, gender, salary)
 • Request account deletion via Support
 
 To request deletion:
@@ -143,7 +185,7 @@ Go to Settings → Contact & Support and submit a deletion request.
           ),
 
           _card(
-            title: "9. Children’s privacy",
+            title: "11. Children’s privacy",
             body: """
 This App is not intended for children under 18.
 
@@ -152,7 +194,7 @@ If you believe a child has provided personal data, contact Support and we will t
           ),
 
           _card(
-            title: "10. Third-party links",
+            title: "12. Third-party links",
             body: """
 The App may contain links to third-party websites or services (for example, employer websites or external apply links).
 
@@ -161,7 +203,7 @@ We are not responsible for third-party privacy practices. Please review their po
           ),
 
           _card(
-            title: "11. Updates to this Privacy Policy",
+            title: "13. Updates to this Privacy Policy",
             body: """
 We may update this Privacy Policy from time to time.
 
@@ -170,7 +212,7 @@ We will update the “Last updated” date at the top of this page. Continued us
           ),
 
           _card(
-            title: "12. Contact",
+            title: "14. Contact",
             body: """
 For privacy-related requests or questions, contact us:
 • From the App: Settings → Contact & Support
