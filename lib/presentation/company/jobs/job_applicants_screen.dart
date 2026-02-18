@@ -1,4 +1,3 @@
-// lib/presentation/company/jobs/job_applicants_screen.dart
 import 'package:flutter/material.dart';
 
 import '../../../core/ui/khilonjiya_ui.dart';
@@ -6,12 +5,15 @@ import '../../../services/employer_applicants_service.dart';
 
 class JobApplicantsScreen extends StatefulWidget {
   final String jobId;
-  final String companyId;
+
+  // companyId is OPTIONAL now (screen will auto-resolve from job)
+  // because your route only sends jobId.
+  final String? companyId;
 
   const JobApplicantsScreen({
     Key? key,
     required this.jobId,
-    required this.companyId,
+    this.companyId,
   }) : super(key: key);
 
   @override
@@ -25,6 +27,9 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
   bool _busy = false;
 
   List<Map<String, dynamic>> _rows = [];
+
+  // Resolved from job
+  String _resolvedCompanyId = '';
 
   // Filters
   String _filter = 'all';
@@ -61,7 +66,17 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
     setState(() => _loading = true);
 
     try {
-      await _service.ensureJobOwnerAndGetJob(widget.jobId);
+      // Security check: employer owns job
+      final job = await _service.ensureJobOwnerAndGetJob(widget.jobId);
+
+      // Resolve companyId from job (best source)
+      _resolvedCompanyId = (job['company_id'] ?? '').toString();
+
+      // fallback if passed
+      if (_resolvedCompanyId.trim().isEmpty && widget.companyId != null) {
+        _resolvedCompanyId = widget.companyId!.trim();
+      }
+
       _rows = await _service.fetchApplicantsForJob(widget.jobId);
     } catch (e) {
       _rows = [];
@@ -115,7 +130,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
       );
 
       row['application_status'] = status;
-      setState(() {});
+      if (mounted) setState(() {});
     } catch (e) {
       _toast("Failed: ${e.toString()}");
     }
@@ -125,6 +140,11 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
   }
 
   Future<void> _scheduleInterview(Map<String, dynamic> row) async {
+    if (_resolvedCompanyId.trim().isEmpty) {
+      _toast("Company not linked to job. Please contact support.");
+      return;
+    }
+
     final picked = await _pickDateTime();
     if (picked == null) return;
 
@@ -135,7 +155,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
       await _service.scheduleInterview(
         listingRowId: (row['id'] ?? '').toString(),
         jobId: widget.jobId,
-        companyId: widget.companyId,
+        companyId: _resolvedCompanyId,
         scheduledAt: picked,
         durationMinutes: 30,
         interviewType: 'video',
@@ -143,7 +163,8 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
 
       row['application_status'] = 'interview_scheduled';
       row['interview_date'] = picked.toIso8601String();
-      setState(() {});
+
+      if (mounted) setState(() {});
       _toast("Interview scheduled");
     } catch (e) {
       _toast("Failed: ${e.toString()}");
@@ -179,6 +200,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
   Future<void> _markViewedIfNeeded(Map<String, dynamic> row) async {
     final status =
         (row['application_status'] ?? 'applied').toString().toLowerCase();
+
     if (status != 'applied') return;
 
     try {
@@ -253,10 +275,8 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
-
                   _statusChip(status),
                   const SizedBox(height: 12),
-
                   _kv("Phone", phone.isEmpty ? "Not provided" : phone),
                   _kv("Email", email.isEmpty ? "Not provided" : email),
                   _kv("District", district.isEmpty ? "Not provided" : district),
@@ -264,9 +284,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                   _kv("Experience", exp.isEmpty ? "Not provided" : exp),
                   _kv("Expected Salary",
                       salary.isEmpty ? "Not provided" : salary),
-
                   const SizedBox(height: 12),
-
                   Text(
                     "Skills",
                     style: KhilonjiyaUI.hTitle.copyWith(fontSize: 14),
@@ -279,9 +297,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                       height: 1.45,
                     ),
                   ),
-
                   const SizedBox(height: 14),
-
                   Text(
                     "Employer Notes",
                     style: KhilonjiyaUI.hTitle.copyWith(fontSize: 14),
@@ -304,9 +320,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 14),
-
                   Row(
                     children: [
                       Expanded(
@@ -360,9 +374,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                       ),
                     ],
                   ),
-
                   const SizedBox(height: 10),
-
                   Row(
                     children: [
                       Expanded(
@@ -416,7 +428,6 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                       ),
                     ],
                   ),
-
                   const SizedBox(height: 16),
                 ],
               ),
