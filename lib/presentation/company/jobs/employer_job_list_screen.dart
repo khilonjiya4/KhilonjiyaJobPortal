@@ -1,3 +1,5 @@
+// File: lib/presentation/company/jobs/employer_job_list_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:sizer/sizer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -71,6 +73,7 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
           .from('job_listings')
           .select('''
             id,
+            company_id,
             job_title,
             district,
             job_type,
@@ -106,7 +109,7 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
   List<Map<String, dynamic>> get _filteredJobs {
     final q = _searchCtrl.text.trim().toLowerCase();
 
-    List<Map<String, dynamic>> items = _jobs;
+    List<Map<String, dynamic>> items = List<Map<String, dynamic>>.from(_jobs);
 
     // Status filter
     if (_statusFilter != 'all') {
@@ -233,7 +236,9 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
   // ------------------------------------------------------------
   Widget _headerCard() {
     final total = _jobs.length;
-    final active = _jobs.where((j) => (j['status'] ?? 'active').toString().toLowerCase() == 'active').length;
+    final active = _jobs
+        .where((j) => (j['status'] ?? 'active').toString().toLowerCase() == 'active')
+        .length;
 
     return Container(
       padding: EdgeInsets.fromLTRB(4.w, 2.0.h, 4.w, 2.0.h),
@@ -493,10 +498,12 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
   }
 
   // ------------------------------------------------------------
-  // JOB CARD (World-class)
+  // JOB CARD
   // ------------------------------------------------------------
   Widget _jobCard(Map<String, dynamic> job) {
     final jobId = (job['id'] ?? '').toString();
+    final companyId = (job['company_id'] ?? '').toString();
+
     final title = (job['job_title'] ?? '').toString();
     final district = (job['district'] ?? '').toString();
     final jobType = (job['job_type'] ?? '').toString();
@@ -506,7 +513,7 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
     final salaryMax = job['salary_max'];
     final salaryPeriod = (job['salary_period'] ?? 'Monthly').toString();
 
-    // ✅ SAFE: avoids crash when supabase returns double/string/null
+    // safe
     final apps = _toInt(job['applications_count']);
     final views = _toInt(job['views_count']);
 
@@ -538,7 +545,7 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // TOP ROW: icon + title + status
+          // TOP ROW
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -623,19 +630,21 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
           Divider(color: Colors.black.withOpacity(0.06), height: 1),
           SizedBox(height: 1.6.h),
 
-          // ACTIONS
+          // ACTIONS (Applicants + Pipeline + Edit)
           Row(
             children: [
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: () async {
-                    await Navigator.pushNamed(
-                      context,
-                      AppRoutes.jobApplicants,
-                      arguments: jobId,
-                    );
-                    await _loadJobs();
-                  },
+                  onPressed: jobId.trim().isEmpty
+                      ? null
+                      : () async {
+                          await Navigator.pushNamed(
+                            context,
+                            AppRoutes.jobApplicants,
+                            arguments: jobId,
+                          );
+                          await _loadJobs();
+                        },
                   icon: const Icon(Icons.people_alt_outlined, size: 18),
                   label: const Text(
                     "Applicants",
@@ -652,7 +661,38 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
                   ),
                 ),
               ),
-              SizedBox(width: 3.w),
+              SizedBox(width: 2.6.w),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: (jobId.trim().isEmpty || companyId.trim().isEmpty)
+                      ? null
+                      : () async {
+                          await Navigator.pushNamed(
+                            context,
+                            AppRoutes.jobApplicantsPipeline,
+                            arguments: {
+                              "jobId": jobId,
+                              "companyId": companyId,
+                            },
+                          );
+                          await _loadJobs();
+                        },
+                  icon: const Icon(Icons.account_tree_outlined, size: 18),
+                  label: const Text(
+                    "Pipeline",
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _text,
+                    side: const BorderSide(color: _line),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(width: 2.6.w),
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: () {
@@ -963,8 +1003,7 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
               style: OutlinedButton.styleFrom(
                 foregroundColor: _text,
                 side: const BorderSide(color: _line),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),
