@@ -51,20 +51,24 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
     );
   }
 
+  // ------------------------------------------------------------
+  // LOAD
+  // ------------------------------------------------------------
   Future<void> _loadAll() async {
     if (!mounted) return;
     setState(() => _loading = true);
 
     try {
-      await _service.ensureJobOwner(widget.jobId);
+      // ✅ SECURITY: real function you already have
+      await _service.ensureJobOwnerAndGetJob(widget.jobId);
 
+      // stages
       _stages = await _service.getCompanyPipelineStages(
         companyId: widget.companyId,
       );
 
-      // Ensure at least 1 stage
+      // fallback stage if company has none
       if (_stages.isEmpty) {
-        // fallback virtual stage
         _stages = [
           {
             'id': 'applied',
@@ -75,6 +79,7 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
         ];
       }
 
+      // applicants
       _rows = await _service.fetchApplicantsForJob(widget.jobId);
 
       _rebuildBuckets();
@@ -92,40 +97,40 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
   void _rebuildBuckets() {
     _stageBuckets.clear();
 
-    // init empty
+    // init empty stage lists
     for (final s in _stages) {
-      final id = (s['id'] ?? '').toString();
-      if (id.trim().isEmpty) continue;
+      final id = (s['id'] ?? '').toString().trim();
+      if (id.isEmpty) continue;
       _stageBuckets[id] = [];
     }
 
-    // Put rows into stage based on employer_notes tag
+    if (_stages.isEmpty) return;
+
+    // determine default stage
+    final def = _stages.firstWhere(
+      (x) => x['is_default'] == true,
+      orElse: () => _stages.first,
+    );
+    final defaultStageId = (def['id'] ?? '').toString();
+
+    // put rows into buckets
     for (final r in _rows) {
       final notes = r['employer_notes'];
-      final stageId = _service.extractStageId(notes);
+      final extracted = _service.extractStageId(notes);
 
-      String finalStageId = stageId;
+      String stageId = extracted.trim().isEmpty ? defaultStageId : extracted;
 
-      if (finalStageId.trim().isEmpty) {
-        // default stage
-        final def = _stages.firstWhere(
-          (x) => x['is_default'] == true,
-          orElse: () => _stages.first,
-        );
-        finalStageId = (def['id'] ?? '').toString();
+      // if stage id not in current company stages, fallback
+      if (_stageBuckets[stageId] == null) {
+        stageId = (_stages.first['id'] ?? '').toString();
       }
 
-      if (_stageBuckets[finalStageId] == null) {
-        // stage not found -> push to first stage
-        finalStageId = (_stages.first['id'] ?? '').toString();
-      }
-
-      _stageBuckets[finalStageId]!.add(r);
+      _stageBuckets[stageId]!.add(r);
     }
   }
 
   // ------------------------------------------------------------
-  // MOVE APPLICANT
+  // MOVE APPLICANT (REAL)
   // ------------------------------------------------------------
   Future<void> _moveToStage({
     required Map<String, dynamic> row,
@@ -139,21 +144,21 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
     setState(() => _moving = true);
 
     try {
+      // ✅ REAL: service updates notes safely and logs stage history
       await _service.moveApplicantToStage(
         listingRowId: listingRowId,
         jobId: widget.jobId,
         toStageId: toStageId,
       );
 
-      // Update local row notes
+      // Refresh local row notes WITHOUT duplicating tags
       final existingNotes = (row['employer_notes'] ?? '').toString();
-      final updatedNotes =
-          '[pipeline_stage_id:$toStageId]\n$existingNotes'.trim();
-
-      row['employer_notes'] = updatedNotes;
+      final cleaned =
+          existingNotes.replaceAll(RegExp(r'\[pipeline_stage_id:.*?\]\s*'), '');
+      row['employer_notes'] = '[pipeline_stage_id:$toStageId]\n$cleaned'.trim();
 
       _rebuildBuckets();
-      setState(() {});
+      if (mounted) setState(() {});
     } catch (e) {
       _toast("Move failed: ${e.toString()}");
     }
@@ -403,7 +408,7 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
 
       row['employer_notes'] = c.text.trim();
       _rebuildBuckets();
-      setState(() {});
+      if (mounted) setState(() {});
       _toast("Saved");
     } catch (e) {
       _toast("Failed: ${e.toString()}");
@@ -476,7 +481,6 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
           ),
         if (_moving) const SizedBox(height: 12),
 
-        // Horizontal board
         SizedBox(
           height: MediaQuery.of(context).size.height - 180,
           child: ListView.separated(
@@ -520,7 +524,6 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // header
           Row(
             children: [
               Expanded(
@@ -646,8 +649,7 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
             if (district.isNotEmpty)
               _miniRow(Icons.location_on_outlined, district),
 
-            if (exp.isNotEmpty)
-              _miniRow(Icons.timeline_outlined, exp),
+            if (exp.isNotEmpty) _miniRow(Icons.timeline_outlined, exp),
 
             if (salary.isNotEmpty)
               _miniRow(Icons.currency_rupee_rounded, salary),
