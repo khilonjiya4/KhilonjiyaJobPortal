@@ -32,6 +32,9 @@ import '../presentation/company/jobs/create_job_screen.dart';
 import '../presentation/company/jobs/employer_job_list_screen.dart';
 import '../presentation/company/jobs/job_applicants_screen.dart';
 
+// ✅ NEW: PIPELINE
+import '../presentation/company/jobs/job_applicants_pipeline_page.dart';
+
 class AppRoutes {
   // ------------------------------------------------------------
   // CORE
@@ -89,6 +92,9 @@ class AppRoutes {
 
   // Requires argument: jobId (String)
   static const String jobApplicants = '/job-applicants';
+
+  // ✅ NEW: Requires arguments: { jobId, companyId }
+  static const String jobApplicantsPipeline = '/job-applicants-pipeline';
 
   // ------------------------------------------------------------
   // ROUTES MAP (NO-ARGUMENT ROUTES ONLY)
@@ -148,6 +154,40 @@ class AppRoutes {
         return MaterialPageRoute(
           builder: (_) => JobApplicantsScreen(jobId: jobId),
         );
+
+      // ✅ NEW: PIPELINE ROUTE
+      case jobApplicantsPipeline:
+        final args = settings.arguments;
+
+        if (args == null || args is! Map) {
+          return MaterialPageRoute(
+            builder: (_) => const Scaffold(
+              body: Center(
+                child: Text("Missing arguments for pipeline page"),
+              ),
+            ),
+          );
+        }
+
+        final jobId = (args['jobId'] ?? '').toString();
+        final companyId = (args['companyId'] ?? '').toString();
+
+        if (jobId.trim().isEmpty || companyId.trim().isEmpty) {
+          return MaterialPageRoute(
+            builder: (_) => const Scaffold(
+              body: Center(
+                child: Text("jobId/companyId missing for pipeline page"),
+              ),
+            ),
+          );
+        }
+
+        return MaterialPageRoute(
+          builder: (_) => JobApplicantsPipelinePage(
+            jobId: jobId,
+            companyId: companyId,
+          ),
+        );
     }
 
     return MaterialPageRoute(
@@ -159,55 +199,4 @@ class AppRoutes {
     );
   }
 
-  // ------------------------------------------------------------
-  // HELPERS
-  // ------------------------------------------------------------
-  static Future<void> pushAndClearStack(
-    BuildContext context,
-    String routeName,
-  ) async {
-    await Navigator.of(context).pushNamedAndRemoveUntil(
-      routeName,
-      (_) => false,
-    );
-  }
-
-  static Future<void> pushNamed(
-    BuildContext context,
-    String routeName, {
-    Object? arguments,
-  }) async {
-    await Navigator.of(context).pushNamed(
-      routeName,
-      arguments: arguments,
-    );
-  }
-
-  static Future<void> pushReplacementNamed(
-    BuildContext context,
-    String routeName, {
-    Object? arguments,
-  }) async {
-    await Navigator.of(context).pushReplacementNamed(
-      routeName,
-      arguments: arguments,
-    );
-  }
-
-  static void pop(BuildContext context, [dynamic result]) {
-    Navigator.of(context).pop(result);
-  }
-
-  static bool canPop(BuildContext context) {
-    return Navigator.of(context).canPop();
-  }
-
-  static T? getArguments<T>(BuildContext context) {
-    final args = ModalRoute.of(context)?.settings.arguments;
-    return args is T ? args : null;
-  }
-
-  static String? getCurrentRouteName(BuildContext context) {
-    return ModalRoute.of(context)?.settings.name;
-  }
-}
+  //
