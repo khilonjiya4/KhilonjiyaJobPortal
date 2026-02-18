@@ -59,9 +59,10 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
       );
 
       _jobs = List<Map<String, dynamic>>.from(res);
-    } catch (_) {
+    } catch (e) {
       _jobs = [];
       _companyId = '';
+      _toast("Failed: ${e.toString()}");
     }
 
     if (!mounted) return;
@@ -129,6 +130,48 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
   }
 
   // ------------------------------------------------------------
+  // DELETE JOB (REAL)
+  // ------------------------------------------------------------
+  Future<void> _deleteJob(String jobId) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) {
+        return AlertDialog(
+          title: const Text("Delete Job?"),
+          content: const Text(
+            "This will permanently delete the job listing.\n\n"
+            "Warning: Applicants linked to this job may also be affected depending on DB constraints.",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFEF4444),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text("Delete"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (ok != true) return;
+
+    try {
+      await _service.deleteJob(jobId: jobId);
+      _toast("Deleted");
+      await _load(silent: true);
+    } catch (e) {
+      _toast("Failed: ${e.toString()}");
+    }
+  }
+
+  // ------------------------------------------------------------
   // NAV
   // ------------------------------------------------------------
   Future<void> _openApplicants(String jobId) async {
@@ -155,6 +198,21 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
       },
     );
     await _load(silent: true);
+  }
+
+  Future<void> _editJob(String jobId) async {
+    // You will add the edit screen later.
+    // For now: reuse create-job screen with args (production safe).
+    final res = await Navigator.pushNamed(
+      context,
+      AppRoutes.createJob,
+      arguments: {
+        'mode': 'edit',
+        'jobId': jobId,
+      },
+    );
+
+    if (res == true) await _load(silent: true);
   }
 
   // ------------------------------------------------------------
@@ -189,6 +247,7 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
         },
         backgroundColor: _primary,
         foregroundColor: Colors.white,
+        elevation: 1,
         icon: const Icon(Icons.add_rounded),
         label: const Text(
           "Post Job",
@@ -238,9 +297,7 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
           Expanded(
             child: TextField(
               controller: _searchController,
-              onChanged: (v) {
-                _search = v;
-              },
+              onChanged: (v) => _search = v,
               onSubmitted: (_) => _load(silent: true),
               decoration: const InputDecoration(
                 hintText: "Search by job title",
@@ -329,17 +386,11 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
 
     return Row(
       children: [
-        Expanded(
-          child: _miniMetric("Jobs", total.toString()),
-        ),
+        Expanded(child: _miniMetric("Jobs", total.toString())),
         const SizedBox(width: 12),
-        Expanded(
-          child: _miniMetric("Active", active.toString()),
-        ),
+        Expanded(child: _miniMetric("Active", active.toString())),
         const SizedBox(width: 12),
-        Expanded(
-          child: _miniMetric("Applicants", applicants.toString()),
-        ),
+        Expanded(child: _miniMetric("Applicants", applicants.toString())),
       ],
     );
   }
@@ -575,9 +626,7 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  expiresAt == null
-                      ? ""
-                      : "Expires: ${_dateShort(expiresAt)}",
+                  expiresAt == null ? "" : "Expires: ${_dateShort(expiresAt)}",
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.right,
@@ -595,7 +644,7 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
           const Divider(height: 1, color: _border),
           const SizedBox(height: 12),
 
-          // actions
+          // primary actions
           Row(
             children: [
               Expanded(
@@ -642,6 +691,53 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
 
           const SizedBox(height: 10),
 
+          // secondary actions (edit / delete)
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _editJob(jobId),
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: const Text(
+                    "Edit",
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _text,
+                    backgroundColor: Colors.white,
+                    side: const BorderSide(color: _border),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _deleteJob(jobId),
+                  icon: const Icon(Icons.delete_outline, size: 18),
+                  label: const Text(
+                    "Delete",
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFEF4444),
+                    backgroundColor: const Color(0xFFFFF1F2),
+                    side: const BorderSide(color: Color(0xFFFECACA)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 10),
+
           // status actions
           _statusActions(jobId, status),
         ],
@@ -655,7 +751,6 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
     final isClosed = status == 'closed';
     final isExpired = status == 'expired';
 
-    // expired -> only allow set active
     if (isExpired) {
       return SizedBox(
         width: double.infinity,
@@ -719,14 +814,16 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
                       jobId: jobId,
                       newStatus: 'paused',
                       title: "Pause Job?",
-                      body: "Job will stop showing in feeds, but applicants remain.",
+                      body:
+                          "Job will stop showing in feeds, but applicants remain.",
                     )
                 : isPaused
                     ? () => _confirmAndChange(
                           jobId: jobId,
                           newStatus: 'active',
                           title: "Resume Job?",
-                          body: "Job will become visible again to job seekers.",
+                          body:
+                              "Job will become visible again to job seekers.",
                         )
                     : null,
             style: OutlinedButton.styleFrom(
@@ -751,7 +848,7 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
               jobId: jobId,
               newStatus: 'closed',
               title: "Close Job?",
-              body: "This will stop applications permanently unless reopened.",
+              body: "This will stop applications unless reopened.",
             ),
             style: OutlinedButton.styleFrom(
               foregroundColor: const Color(0xFFEF4444),
