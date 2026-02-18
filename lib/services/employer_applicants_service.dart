@@ -1,56 +1,32 @@
-// File: lib/services/employer_applicants_service.dart
-
+// lib/services/employer_applicants_service.dart
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class EmployerApplicantsService {
   final SupabaseClient _db = Supabase.instance.client;
 
-  // ------------------------------------------------------------
-  // AUTH HELPERS
-  // ------------------------------------------------------------
-  void _ensureAuth() {
+  User _requireUser() {
     final u = _db.auth.currentUser;
     if (u == null) throw Exception("Session expired. Please login again.");
-  }
-
-  String _userId() {
-    _ensureAuth();
-    return _db.auth.currentUser!.id;
+    return u;
   }
 
   // ------------------------------------------------------------
   // SECURITY: ensure current user owns the job
   // ------------------------------------------------------------
-  //
-  // IMPORTANT:
-  // In your app you have BOTH patterns in code:
-  // - job_listings.user_id
-  // - job_listings.employer_id
-  //
-  // This method now supports BOTH safely.
-  //
   Future<void> ensureJobOwner(String jobId) async {
-    final uid = _userId();
+    final user = _requireUser();
 
     final job = await _db
         .from('job_listings')
-        .select('id, employer_id, user_id')
+        .select('id, employer_id')
         .eq('id', jobId)
         .maybeSingle();
 
     if (job == null) throw Exception("Job not found");
 
-    final employerId = (job['employer_id'] ?? '').toString().trim();
-    final userId = (job['user_id'] ?? '').toString().trim();
-
-    final ownerId = employerId.isNotEmpty ? employerId : userId;
-
-    if (ownerId.isEmpty) {
-      throw Exception("Job owner not set. Please fix job_listings owner field.");
-    }
-
-    if (ownerId != uid) {
+    final employerId = (job['employer_id'] ?? '').toString();
+    if (employerId != user.id) {
       throw Exception("Not allowed to access applicants for this job");
     }
   }
@@ -61,23 +37,22 @@ class EmployerApplicantsService {
   Future<List<Map<String, dynamic>>> getCompanyPipelineStages({
     required String companyId,
   }) async {
-    _ensureAuth();
+    _requireUser();
 
     final res = await _db
         .from('company_pipeline_stages')
-        .select('id, company_id, stage_key, stage_name, sort_order, is_active')
+        .select('id, company_id, stage_name, stage_order, is_default')
         .eq('company_id', companyId)
-        .eq('is_active', true)
-        .order('sort_order', ascending: true);
+        .order('stage_order', ascending: true);
 
     return List<Map<String, dynamic>>.from(res);
   }
 
   // ------------------------------------------------------------
-  // LOAD APPLICANTS FOR JOB (WITH APPLICATION + STAGE)
+  // FETCH APPLICANTS FOR JOB
   // ------------------------------------------------------------
   Future<List<Map<String, dynamic>>> fetchApplicantsForJob(String jobId) async {
-    _ensureAuth();
+    _requireUser();
 
     final res = await _db
         .from('job_applications_listings')
@@ -87,7 +62,6 @@ class EmployerApplicantsService {
           application_id,
           applied_at,
           application_status,
-          pipeline_stage_id,
           employer_notes,
           interview_date,
           user_id,
@@ -123,106 +97,136 @@ class EmployerApplicantsService {
   }
 
   // ------------------------------------------------------------
-  // MOVE APPLICANT TO STAGE
+  // MOVE APPLICANT TO A PIPELINE STAGE
+  // We store stage_id in employer_notes JSON (since schema doesn't have pipeline_stage_id)
+  //
+  // IMPORTANT:
+  // Your schema for job_applications_listings does NOT have pipeline_stage_id.
+  // So we store stage_id in employer_notes as JSON:
+  // { "pipeline_stage_id": "...", "note": "..." }
+  //
+  // This keeps it working without DB migration.
   // ------------------------------------------------------------
-  //
-  // This method now:
-  // 1) Updates pipeline_stage_id
-  // 2) Writes application_stage_history
-  // 3) Writes application_events
-  // 4) Optionally maps application_status using stage_key (if you want)
-  //
   Future<void> moveApplicantToStage({
     required String listingRowId,
     required String jobId,
-    required String? fromStageId,
     required String toStageId,
     String? note,
   }) async {
-    _ensureAuth();
+    final user = _requireUser();
 
-    // SECURITY: verify ownership for THIS job
+    // Verify owner
     await ensureJobOwner(jobId);
 
-    final uid = _userId();
+    // Fetch current employer_notes so we don't overwrite
+    final row = await _db
+        .from('job_applications_listings')
+        .select('id, employer_notes')
+        .eq('id', listingRowId)
+        .maybeSingle();
 
-    // ------------------------------------------------------------
-    // 1) Update listing stage
-    // ------------------------------------------------------------
+    if (row == null) throw Exception("Application row not found");
+
+    final existingNotes = (row['employer_notes'] ?? '').toString().trim();
+
+    // Save pipeline stage inside employer_notes JSON-like string
+    // (Simple safe format: stage:<uuid>)
+    final newNotes = _mergeNotes(
+      existingNotes: existingNotes,
+      stageId: toStageId,
+      note: note,
+    );
+
     await _db.from('job_applications_listings').update({
-      'pipeline_stage_id': toStageId,
-      // if you want, also store employer_notes directly
-      if ((note ?? '').trim().isNotEmpty) 'employer_notes': (note ?? '').trim(),
+      'employer_notes': newNotes,
     }).eq('id', listingRowId);
 
-    // ------------------------------------------------------------
-    // 2) Insert stage history
-    // ------------------------------------------------------------
+    // Stage history
     try {
       await _db.from('application_stage_history').insert({
         'job_application_listing_id': listingRowId,
-        'from_stage_id': (fromStageId ?? '').trim().isEmpty ? null : fromStageId,
-        'to_stage_id': toStageId,
-        'changed_by': uid,
-        'notes': (note ?? '').trim(),
-        'changed_at': DateTime.now().toIso8601String(),
+        'stage_id': toStageId,
+        'moved_by': user.id,
+        'moved_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
       if (kDebugMode) debugPrint("stage_history insert failed: $e");
     }
 
-    // ------------------------------------------------------------
-    // 3) Insert event
-    // ------------------------------------------------------------
+    // Event log
     try {
       await _db.from('application_events').insert({
         'job_application_listing_id': listingRowId,
-        'event_type': 'stage_changed',
-        'actor_user_id': uid,
-        'notes': (note ?? '').trim().isEmpty ? 'Moved stage' : (note ?? '').trim(),
+        'event_type': 'stage_moved',
+        'actor_user_id': user.id,
+        'notes': 'Moved to stage',
         'created_at': DateTime.now().toIso8601String(),
       });
-    } catch (e) {
-      if (kDebugMode) debugPrint("application_events insert failed: $e");
-    }
+    } catch (_) {}
+  }
 
-    // ------------------------------------------------------------
-    // 4) OPTIONAL: auto update application_status
-    // ------------------------------------------------------------
-    //
-    // Only do this if your DB uses application_status for filtering.
-    // If you rely ONLY on pipeline_stage_id, you can remove this.
-    //
-    // This mapping is safe even if stage IDs are UUIDs,
-    // because we read stage_key from company_pipeline_stages.
-    //
+  // ------------------------------------------------------------
+  // SAVE EMPLOYER NOTE
+  // ------------------------------------------------------------
+  Future<void> updateEmployerNotes({
+    required String listingRowId,
+    required String jobId,
+    required String notes,
+  }) async {
+    _requireUser();
+    await ensureJobOwner(jobId);
+
+    await _db.from('job_applications_listings').update({
+      'employer_notes': notes.trim(),
+    }).eq('id', listingRowId);
+
     try {
-      final stage = await _db
-          .from('company_pipeline_stages')
-          .select('id, stage_key')
-          .eq('id', toStageId)
-          .maybeSingle();
+      final user = _db.auth.currentUser;
+      await _db.from('application_events').insert({
+        'job_application_listing_id': listingRowId,
+        'event_type': 'note_updated',
+        'actor_user_id': user?.id,
+        'notes': 'Employer updated notes',
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (_) {}
+  }
 
-      final stageKey = (stage?['stage_key'] ?? '').toString().toLowerCase().trim();
+  // ------------------------------------------------------------
+  // INTERNAL: stage stored in notes
+  // ------------------------------------------------------------
+  String _mergeNotes({
+    required String existingNotes,
+    required String stageId,
+    String? note,
+  }) {
+    // We store as:
+    // [pipeline_stage_id:<uuid>]
+    // <existing text...>
+    // <note line...>
 
-      String? mappedStatus;
+    String cleaned = existingNotes;
 
-      // Keep these values consistent with your existing UI:
-      // applied, shortlisted, rejected, viewed, etc.
-      if (stageKey == 'applied') mappedStatus = 'applied';
-      if (stageKey == 'shortlisted') mappedStatus = 'shortlisted';
-      if (stageKey == 'rejected') mappedStatus = 'rejected';
-      if (stageKey == 'interview') mappedStatus = 'shortlisted'; // or 'interview'
-      if (stageKey == 'hired') mappedStatus = 'shortlisted'; // or 'hired'
+    // Remove old stage tag
+    cleaned = cleaned.replaceAll(RegExp(r'\[pipeline_stage_id:.*?\]\s*'), '');
 
-      if (mappedStatus != null) {
-        await _db.from('job_applications_listings').update({
-          'application_status': mappedStatus,
-        }).eq('id', listingRowId);
-      }
-    } catch (e) {
-      // ignore: mapping is optional
-      if (kDebugMode) debugPrint("status mapping failed: $e");
+    final tag = '[pipeline_stage_id:$stageId]';
+
+    final extra = (note ?? '').trim();
+    if (extra.isEmpty) {
+      return '$tag\n$cleaned'.trim();
     }
+
+    return '$tag\n$cleaned\n\n$extra'.trim();
+  }
+
+  // Extract stage id from employer_notes
+  String extractStageId(dynamic employerNotes) {
+    if (employerNotes == null) return '';
+    final s = employerNotes.toString();
+
+    final m = RegExp(r'\[pipeline_stage_id:(.*?)\]').firstMatch(s);
+    if (m == null) return '';
+    return (m.group(1) ?? '').trim();
   }
 }
