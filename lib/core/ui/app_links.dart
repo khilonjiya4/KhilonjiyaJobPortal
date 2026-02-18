@@ -2,20 +2,31 @@
 
 class AppLinks {
   // ------------------------------------------------------------
-  // IMPORTANT:
-  // For now these are internal routes (in-app pages).
-  // Later, when you build a website, replace these with HTTPS URLs.
+  // COMPANY
   // ------------------------------------------------------------
+  static const String companyName = 'Khilonjiya India Private Limited';
 
-  // WEBSITE (future)
-  static const String websiteBase = ''; // e.g. https://khilonjiya.in
+  // ------------------------------------------------------------
+  // WEBSITE (put your real domain later)
+  // Example: https://khilonjiya.in
+  // ------------------------------------------------------------
+  static const String websiteUrl = '';
 
-  // Legal (future URLs)
+  // ------------------------------------------------------------
+  // SUPPORT
+  // ------------------------------------------------------------
+  static const String supportEmail = ''; // example: support@khilonjiya.in
+
+  // ------------------------------------------------------------
+  // LEGAL URLS (put your real website urls later)
+  // ------------------------------------------------------------
   static const String privacyPolicyUrl = '';
   static const String termsUrl = '';
-  static const String refundsUrl = '';
-  static const String contactUrl = '';
+  static const String refundPolicyUrl = '';
+  static const String contactSupportUrl = '';
 
-  // Social / company
-  static const String companyName = 'Khilonjiya India Private Limited';
+  // ------------------------------------------------------------
+  // PLAY STORE (replace later)
+  // ------------------------------------------------------------
+  static const String playStoreUrl = '';
 }
