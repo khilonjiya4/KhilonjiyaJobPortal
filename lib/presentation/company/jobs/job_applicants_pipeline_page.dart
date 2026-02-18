@@ -1,3 +1,5 @@
+// File: lib/presentation/company/jobs/job_applicants_pipeline_page.dart
+
 import 'dart:math';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -137,6 +139,14 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
         _stages = stages;
       }
 
+      // IMPORTANT:
+      // keep stage list sorted by sort_order
+      _stages.sort((a, b) {
+        final ao = _toInt(a['sort_order']);
+        final bo = _toInt(b['sort_order']);
+        return ao.compareTo(bo);
+      });
+
       final rows = await _service.fetchApplicantsForJob(widget.jobId);
 
       // sign urls for UI
@@ -173,16 +183,32 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
   // group rows by stage
   // ------------------------------------------------------------
   List<Map<String, dynamic>> _rowsForStage(String stageId) {
+    final appliedStageId = _appliedStageId();
+
     return _rows.where((r) {
       final v = (r['pipeline_stage_id'] ?? '').toString().trim();
 
       // if pipeline_stage_id not set, treat as applied
       if (v.isEmpty) {
-        return stageId == _stages.first['id'].toString();
+        return stageId == appliedStageId;
       }
 
       return v == stageId;
     }).toList();
+  }
+
+  String _appliedStageId() {
+    if (_stages.isEmpty) return 'applied';
+
+    // try find stage_key=applied
+    final idx = _stages.indexWhere((s) {
+      return (s['stage_key'] ?? '').toString().toLowerCase().trim() == 'applied';
+    });
+
+    if (idx != -1) return _stages[idx]['id'].toString();
+
+    // fallback: first stage
+    return _stages.first['id'].toString();
   }
 
   // ------------------------------------------------------------
@@ -278,6 +304,21 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
   }
 
   Widget _pipeline() {
+    if (_stages.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: EdgeInsets.all(7.w),
+          child: const Text(
+            "No pipeline stages found.",
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              color: _muted,
+            ),
+          ),
+        ),
+      );
+    }
+
     return ListView(
       padding: EdgeInsets.fromLTRB(4.w, 1.2.h, 4.w, 3.h),
       children: [
@@ -368,11 +409,12 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
               onWillAccept: (data) => data != null,
               onAccept: (data) async {
                 final listingRowId = data['id'].toString();
+
                 final fromStageId =
                     (data['pipeline_stage_id'] ?? '').toString().trim();
 
                 final actualFrom =
-                    fromStageId.isEmpty ? _stages.first['id'].toString() : fromStageId;
+                    fromStageId.isEmpty ? _appliedStageId() : fromStageId;
 
                 if (actualFrom == stageId) return;
 
@@ -385,7 +427,8 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
               builder: (context, candidateData, rejectedData) {
                 final highlight = candidateData.isNotEmpty;
 
-                return Container(
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
                   decoration: BoxDecoration(
                     color: highlight
                         ? const Color(0xFFEFF6FF)
@@ -393,6 +436,7 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
                     borderRadius: BorderRadius.circular(18),
                     border: Border.all(
                       color: highlight ? const Color(0xFFBFDBFE) : _line,
+                      width: highlight ? 1.6 : 1,
                     ),
                   ),
                   child: items.isEmpty
@@ -662,6 +706,13 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
         ),
       ),
     );
+  }
+
+  int _toInt(dynamic v) {
+    if (v == null) return 0;
+    if (v is int) return v;
+    if (v is double) return v.toInt();
+    return int.tryParse(v.toString()) ?? 0;
   }
 
   Widget _errorState() {
