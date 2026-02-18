@@ -1,3 +1,5 @@
+// File: lib/presentation/common/widgets/pages/job_details_page.dart
+
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -275,6 +277,7 @@ class _JobDetailsPageState extends State<JobDetailsPage> {
 
     final salaryMin = job['salary_min'];
     final salaryMax = job['salary_max'];
+    final salaryPeriod = (job['salary_period'] ?? 'Month').toString().trim();
 
     final description = (job['job_description'] ?? '').toString();
 
@@ -301,7 +304,11 @@ class _JobDetailsPageState extends State<JobDetailsPage> {
                       title: title,
                       company: companyName,
                       location: location,
-                      salary: _salary(salaryMin, salaryMax),
+                      salary: _salaryText(
+                        salaryMin: salaryMin,
+                        salaryMax: salaryMax,
+                        salaryPeriod: salaryPeriod,
+                      ),
                       postedText: _postedAgo(postedAt),
                     ),
                     const SizedBox(height: 14),
@@ -324,7 +331,6 @@ class _JobDetailsPageState extends State<JobDetailsPage> {
 
                     if (skills.isNotEmpty) const SizedBox(height: 14),
 
-                    // ✅ REAL responsibilities
                     _sectionCard(
                       title: "Roles & Responsibilities",
                       child: responsibilities.isEmpty
@@ -346,7 +352,6 @@ class _JobDetailsPageState extends State<JobDetailsPage> {
 
                     const SizedBox(height: 14),
 
-                    // ✅ REAL company overview + follow button + rating
                     _sectionCard(
                       title: "Company Overview",
                       child: _buildCompanyOverview(),
@@ -354,7 +359,6 @@ class _JobDetailsPageState extends State<JobDetailsPage> {
 
                     const SizedBox(height: 16),
 
-                    // ✅ REAL company reviews
                     _sectionCard(
                       title: "Company Reviews",
                       child: _buildCompanyReviews(),
@@ -362,7 +366,6 @@ class _JobDetailsPageState extends State<JobDetailsPage> {
 
                     const SizedBox(height: 18),
 
-                    // ✅ REAL similar jobs
                     Text("Similar jobs", style: KhilonjiyaUI.hTitle),
                     const SizedBox(height: 10),
                     _buildSimilarJobs(),
@@ -1011,7 +1014,15 @@ class _JobDetailsPageState extends State<JobDetailsPage> {
   int _toInt(dynamic v) {
     if (v == null) return 0;
     if (v is int) return v;
+    if (v is double) return v.toInt();
     return int.tryParse(v.toString()) ?? 0;
+  }
+
+  int? _toIntOrNull(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is double) return v.toInt();
+    return int.tryParse(v.toString());
   }
 
   List<String> _safeSkills(dynamic raw) {
@@ -1047,21 +1058,31 @@ class _JobDetailsPageState extends State<JobDetailsPage> {
     return [];
   }
 
-  String _salary(dynamic min, dynamic max) {
-    int? toInt(dynamic v) {
-      if (v == null) return null;
-      if (v is int) return v;
-      return int.tryParse(v.toString());
+  String _salaryText({
+    required dynamic salaryMin,
+    required dynamic salaryMax,
+    required String salaryPeriod,
+  }) {
+    final mn = _toIntOrNull(salaryMin);
+    final mx = _toIntOrNull(salaryMax);
+
+    String per = salaryPeriod.trim().toLowerCase();
+    if (per.isEmpty) per = "month";
+
+    // normalize common values
+    if (per == "monthly") per = "month";
+    if (per == "per month") per = "month";
+    if (per == "month") per = "month";
+
+    if (mn == null && mx == null) return "Salary not disclosed";
+
+    if (mn != null && mx != null) {
+      if (mn == mx) return "₹$mn / $per";
+      return "₹$mn - ₹$mx / $per";
     }
 
-    final mn = toInt(min);
-    final mx = toInt(max);
-
-    String f(int v) => '${(v / 1000).toStringAsFixed(0)}k / month';
-
-    if (mn != null && mx != null) return '${f(mn)} - ${f(mx)}';
-    if (mn != null) return f(mn);
-    return 'Not disclosed';
+    if (mn != null) return "₹$mn / $per";
+    return "₹$mx / $per";
   }
 
   String _postedAgo(String? date) {
