@@ -1,8 +1,16 @@
 import 'package:flutter/material.dart';
+
 import '../../core/ui/khilonjiya_ui.dart';
+import '../../core/app_export.dart';
+
+import '../../routes/app_routes.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({Key? key}) : super(key: key);
+
+  void _go(BuildContext context, String route) {
+    Navigator.pushNamed(context, route);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -20,22 +28,26 @@ class SettingsPage extends StatelessWidget {
           _tile(
             icon: Icons.notifications_outlined,
             title: "Notifications",
-            onTap: () {},
+            subtitle: "Manage job alerts and app notifications",
+            onTap: () => _go(context, AppRoutes.notificationSettings),
           ),
           _tile(
             icon: Icons.lock_outline,
-            title: "Privacy",
-            onTap: () {},
+            title: "Privacy & Policies",
+            subtitle: "Privacy policy, terms, refund and more",
+            onTap: () => _go(context, AppRoutes.privacySettings),
           ),
           _tile(
             icon: Icons.language_outlined,
             title: "Language",
-            onTap: () {},
+            subtitle: "Choose your preferred language",
+            onTap: () => _go(context, AppRoutes.languageSettings),
           ),
           _tile(
             icon: Icons.info_outline,
             title: "About",
-            onTap: () {},
+            subtitle: "App info, version, company details",
+            onTap: () => _go(context, AppRoutes.about),
           ),
         ],
       ),
@@ -45,6 +57,7 @@ class SettingsPage extends StatelessWidget {
   Widget _tile({
     required IconData icon,
     required String title,
+    required String subtitle,
     required VoidCallback onTap,
   }) {
     return InkWell(
@@ -63,11 +76,23 @@ class SettingsPage extends StatelessWidget {
             Icon(icon, color: const Color(0xFF334155)),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(
-                title,
-                style: KhilonjiyaUI.body.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: KhilonjiyaUI.body.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: KhilonjiyaUI.sub.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
             ),
             const Icon(Icons.chevron_right, color: KhilonjiyaUI.muted),
