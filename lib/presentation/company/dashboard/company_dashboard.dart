@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../routes/app_routes.dart';
-import '../../../services/employer_job_service.dart';
 import '../../../services/mobile_auth_service.dart';
+import '../../../services/employer_dashboard_service.dart';
 
 class CompanyDashboard extends StatefulWidget {
   const CompanyDashboard({Key? key}) : super(key: key);
@@ -13,36 +13,37 @@ class CompanyDashboard extends StatefulWidget {
 }
 
 class _CompanyDashboardState extends State<CompanyDashboard> {
-  final SupabaseClient _db = Supabase.instance.client;
-  final EmployerJobService _service = EmployerJobService();
+  final EmployerDashboardService _service = EmployerDashboardService();
 
   bool _loading = true;
+  bool _refreshing = false;
 
-  List<Map<String, dynamic>> _jobs = [];
+  // REAL DATA
+  Map<String, dynamic> _company = {};
   Map<String, dynamic> _stats = {};
+  List<Map<String, dynamic>> _jobs = [];
   List<Map<String, dynamic>> _recentApplicants = [];
+  List<Map<String, dynamic>> _todayInterviews = [];
+  Map<String, dynamic> _perf7d = {};
   List<Map<String, dynamic>> _topJobs = [];
 
-  // REAL extras
-  Map<String, dynamic>? _company;
   int _unreadNotifications = 0;
-
-  // interviews today
-  bool _loadingInterviews = true;
-  List<Map<String, dynamic>> _todayInterviews = [];
-
-  // performance last 7 days
-  bool _loadingPerformance = true;
-  List<Map<String, dynamic>> _perfDays = []; // [{date, views, applicants}]
-  int _views7d = 0;
-  int _apps7d = 0;
-
-  // action needed
-  int _pendingReviewCount = 0;
-  int _expiringJobsCount = 0;
 
   // Bottom nav
   int _bottomIndex = 0;
+
+  // ------------------------------------------------------------
+  // UI TOKENS (Minimal, Elegant)
+  // ------------------------------------------------------------
+  static const Color _bg = Color(0xFFF7F8FA);
+  static const Color _card = Colors.white;
+  static const Color _border = Color(0xFFE6E8EC);
+  static const Color _text = Color(0xFF111827);
+  static const Color _muted = Color(0xFF6B7280);
+  static const Color _primary = Color(0xFF2563EB);
+
+  static const double _r16 = 16;
+  static const double _r20 = 20;
 
   @override
   void initState() {
@@ -50,343 +51,59 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     _loadDashboard();
   }
 
-  // ------------------------------------------------------------
-  // LOAD DASHBOARD
-  // ------------------------------------------------------------
-  Future<void> _loadDashboard() async {
+  User _requireUser() {
+    final u = Supabase.instance.client.auth.currentUser;
+    if (u == null) throw Exception("Session expired. Please login again.");
+    return u;
+  }
+
+  Future<void> _loadDashboard({bool silent = false}) async {
     if (!mounted) return;
-    setState(() => _loading = true);
+
+    if (!silent) setState(() => _loading = true);
+    if (silent) setState(() => _refreshing = true);
 
     try {
+      final user = _requireUser();
+
+      // Resolve company first (needed for interviews)
+      final company = await _service.resolveMyCompany();
+      final companyId = (company['id'] ?? '').toString();
+
       final results = await Future.wait([
         _service.fetchEmployerJobs(),
         _service.fetchEmployerDashboardStats(),
         _service.fetchRecentApplicants(limit: 6),
         _service.fetchTopJobs(limit: 6),
+        _service.fetchTodayInterviews(companyId: companyId, limit: 10),
+        _service.fetchLast7DaysPerformance(employerId: user.id),
+        _service.fetchUnreadNotificationsCount(),
       ]);
 
+      _company = Map<String, dynamic>.from(company);
       _jobs = List<Map<String, dynamic>>.from(results[0] as List);
       _stats = Map<String, dynamic>.from(results[1] as Map);
       _recentApplicants = List<Map<String, dynamic>>.from(results[2] as List);
       _topJobs = List<Map<String, dynamic>>.from(results[3] as List);
-
-      // Load real company from first job (since every job has company_id)
-      _company = await _fetchEmployerCompanyFromJobs(_jobs);
-
-      // Load unread notifications
-      _unreadNotifications = await _fetchUnreadNotificationsCount();
-
-      // Interviews + performance + action needed
-      await Future.wait([
-        _loadTodayInterviews(),
-        _loadPerformance7Days(),
-        _computeActionNeeded(),
-      ]);
+      _todayInterviews = List<Map<String, dynamic>>.from(results[4] as List);
+      _perf7d = Map<String, dynamic>.from(results[5] as Map);
+      _unreadNotifications = (results[6] as int);
     } catch (_) {
+      _company = {};
       _jobs = [];
       _stats = {};
       _recentApplicants = [];
       _topJobs = [];
-
-      _company = null;
+      _todayInterviews = [];
+      _perf7d = {};
       _unreadNotifications = 0;
-
-      _todayInterviews = [];
-      _perfDays = [];
-      _views7d = 0;
-      _apps7d = 0;
-      _pendingReviewCount = 0;
-      _expiringJobsCount = 0;
     }
 
     if (!mounted) return;
-    setState(() => _loading = false);
-  }
-
-  // ------------------------------------------------------------
-  // AUTH
-  // ------------------------------------------------------------
-  String _uid() {
-    final u = _db.auth.currentUser;
-    if (u == null) throw Exception("Session expired. Please login again.");
-    return u.id;
-  }
-
-  // ------------------------------------------------------------
-  // COMPANY (REAL)
-  // ------------------------------------------------------------
-  Future<Map<String, dynamic>?> _fetchEmployerCompanyFromJobs(
-    List<Map<String, dynamic>> jobs,
-  ) async {
-    if (jobs.isEmpty) return null;
-
-    final first = jobs.first;
-    final companyObj = first['companies'];
-
-    if (companyObj is Map) {
-      return Map<String, dynamic>.from(companyObj);
-    }
-
-    final companyId = (first['company_id'] ?? '').toString().trim();
-    if (companyId.isEmpty) return null;
-
-    final res = await _db
-        .from('companies')
-        .select('id,name,logo_url,is_verified,headquarters_state,headquarters_city')
-        .eq('id', companyId)
-        .maybeSingle();
-
-    if (res == null) return null;
-    return Map<String, dynamic>.from(res);
-  }
-
-  // ------------------------------------------------------------
-  // NOTIFICATIONS (REAL)
-  // ------------------------------------------------------------
-  Future<int> _fetchUnreadNotificationsCount() async {
-    final uid = _uid();
-
-    try {
-      // NOTE: Supabase count works only with PostgREST count option.
-      // This approach fetches small ids only, safe enough.
-      final res = await _db
-          .from('notifications')
-          .select('id')
-          .eq('user_id', uid)
-          .eq('is_read', false)
-          .limit(50);
-
-      return (res as List).length;
-    } catch (_) {
-      return 0;
-    }
-  }
-
-  // ------------------------------------------------------------
-  // INTERVIEWS TODAY (REAL)
-  // ------------------------------------------------------------
-  Future<void> _loadTodayInterviews() async {
-    if (!mounted) return;
-    setState(() => _loadingInterviews = true);
-
-    try {
-      if (_company == null) {
-        _todayInterviews = [];
-        if (!mounted) return;
-        setState(() => _loadingInterviews = false);
-        return;
-      }
-
-      final companyId = (_company?['id'] ?? '').toString();
-      if (companyId.trim().isEmpty) {
-        _todayInterviews = [];
-        if (!mounted) return;
-        setState(() => _loadingInterviews = false);
-        return;
-      }
-
-      final now = DateTime.now();
-      final start = DateTime(now.year, now.month, now.day, 0, 0, 0);
-      final end = start.add(const Duration(days: 1));
-
-      final res = await _db
-          .from('interviews')
-          .select('''
-            id,
-            job_application_listing_id,
-            interview_type,
-            scheduled_at,
-            duration_minutes,
-            meeting_link,
-            location_address,
-            round_number,
-
-            job_applications_listings (
-              id,
-              listing_id,
-              application_status,
-
-              job_listings (
-                id,
-                job_title
-              ),
-
-              job_applications (
-                id,
-                name,
-                phone,
-                district,
-                education,
-                experience_level
-              )
-            )
-          ''')
-          .eq('company_id', companyId)
-          .gte('scheduled_at', start.toIso8601String())
-          .lt('scheduled_at', end.toIso8601String())
-          .order('scheduled_at', ascending: true)
-          .limit(12);
-
-      _todayInterviews = List<Map<String, dynamic>>.from(res);
-    } catch (_) {
-      _todayInterviews = [];
-    }
-
-    if (!mounted) return;
-    setState(() => _loadingInterviews = false);
-  }
-
-  // ------------------------------------------------------------
-  // PERFORMANCE LAST 7 DAYS (REAL)
-  // - views from job_views
-  // - applicants from job_applications_listings.applied_at
-  // ------------------------------------------------------------
-  Future<void> _loadPerformance7Days() async {
-    if (!mounted) return;
-    setState(() => _loadingPerformance = true);
-
-    try {
-      if (_jobs.isEmpty) {
-        _perfDays = [];
-        _views7d = 0;
-        _apps7d = 0;
-        if (!mounted) return;
-        setState(() => _loadingPerformance = false);
-        return;
-      }
-
-      final jobIds = _jobs.map((e) => (e['id'] ?? '').toString()).toList();
-      if (jobIds.isEmpty) {
-        _perfDays = [];
-        _views7d = 0;
-        _apps7d = 0;
-        if (!mounted) return;
-        setState(() => _loadingPerformance = false);
-        return;
-      }
-
-      final now = DateTime.now();
-      final start = DateTime(now.year, now.month, now.day)
-          .subtract(const Duration(days: 6)); // include today = 7 days
-
-      // views
-      final viewsRes = await _db
-          .from('job_views')
-          .select('job_id, viewed_at')
-          .inFilter('job_id', jobIds)
-          .gte('viewed_at', start.toIso8601String())
-          .limit(5000);
-
-      final viewsRows = List<Map<String, dynamic>>.from(viewsRes);
-
-      // applicants
-      final appsRes = await _db
-          .from('job_applications_listings')
-          .select('listing_id, applied_at')
-          .inFilter('listing_id', jobIds)
-          .gte('applied_at', start.toIso8601String())
-          .limit(5000);
-
-      final appsRows = List<Map<String, dynamic>>.from(appsRes);
-
-      // bucket by day
-      final Map<String, int> viewsByDay = {};
-      final Map<String, int> appsByDay = {};
-
-      String dayKey(DateTime d) =>
-          "${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
-
-      for (final r in viewsRows) {
-        final dt = DateTime.tryParse((r['viewed_at'] ?? '').toString());
-        if (dt == null) continue;
-        final k = dayKey(dt.toLocal());
-        viewsByDay[k] = (viewsByDay[k] ?? 0) + 1;
-      }
-
-      for (final r in appsRows) {
-        final dt = DateTime.tryParse((r['applied_at'] ?? '').toString());
-        if (dt == null) continue;
-        final k = dayKey(dt.toLocal());
-        appsByDay[k] = (appsByDay[k] ?? 0) + 1;
-      }
-
-      final List<Map<String, dynamic>> days = [];
-      int totalViews = 0;
-      int totalApps = 0;
-
-      for (int i = 0; i < 7; i++) {
-        final d = start.add(Duration(days: i));
-        final k = dayKey(d);
-
-        final v = viewsByDay[k] ?? 0;
-        final a = appsByDay[k] ?? 0;
-
-        totalViews += v;
-        totalApps += a;
-
-        days.add({
-          'date': d,
-          'views': v,
-          'apps': a,
-        });
-      }
-
-      _perfDays = days;
-      _views7d = totalViews;
-      _apps7d = totalApps;
-    } catch (_) {
-      _perfDays = [];
-      _views7d = 0;
-      _apps7d = 0;
-    }
-
-    if (!mounted) return;
-    setState(() => _loadingPerformance = false);
-  }
-
-  // ------------------------------------------------------------
-  // ACTION NEEDED (REAL)
-  // - pending review = applicants with status = applied
-  // - expiring jobs = expires_at within next 2 days and status=active
-  // ------------------------------------------------------------
-  Future<void> _computeActionNeeded() async {
-    try {
-      if (_jobs.isEmpty) {
-        _pendingReviewCount = 0;
-        _expiringJobsCount = 0;
-        return;
-      }
-
-      final jobIds = _jobs.map((e) => (e['id'] ?? '').toString()).toList();
-
-      // pending review
-      final pendingRes = await _db
-          .from('job_applications_listings')
-          .select('id')
-          .inFilter('listing_id', jobIds)
-          .eq('application_status', 'applied')
-          .limit(200);
-
-      _pendingReviewCount = (pendingRes as List).length;
-
-      // expiring jobs
-      final now = DateTime.now();
-      final soon = now.add(const Duration(days: 2));
-
-      final expiringRes = await _db
-          .from('job_listings')
-          .select('id')
-          .eq('employer_id', _uid())
-          .eq('status', 'active')
-          .lte('expires_at', soon.toIso8601String())
-          .gte('expires_at', now.toIso8601String())
-          .limit(200);
-
-      _expiringJobsCount = (expiringRes as List).length;
-    } catch (_) {
-      _pendingReviewCount = 0;
-      _expiringJobsCount = 0;
-    }
+    setState(() {
+      _loading = false;
+      _refreshing = false;
+    });
   }
 
   // ------------------------------------------------------------
@@ -419,17 +136,21 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   int get _applicants24h => _s('applicants_last_24h');
 
   // ------------------------------------------------------------
-  // DESIGN TOKENS (minimal, elegant)
+  // COMPANY SAFE
   // ------------------------------------------------------------
-  static const Color _bg = Color(0xFFF7F8FA);
-  static const Color _card = Colors.white;
-  static const Color _border = Color(0xFFE6E8EC);
-  static const Color _text = Color(0xFF111827);
-  static const Color _muted = Color(0xFF6B7280);
-  static const Color _primary = Color(0xFF2563EB);
+  String get _companyName => (_company['name'] ?? 'Company').toString();
+  String get _companyLogo => (_company['logo_url'] ?? '').toString();
+  bool get _companyVerified => (_company['is_verified'] ?? false) == true;
 
-  static const double _r16 = 16;
-  static const double _r20 = 20;
+  String get _companyLocation {
+    final city = (_company['headquarters_city'] ?? '').toString().trim();
+    final state = (_company['headquarters_state'] ?? '').toString().trim();
+
+    if (city.isNotEmpty && state.isNotEmpty) return "$city, $state";
+    if (state.isNotEmpty) return state;
+    if (city.isNotEmpty) return city;
+    return "India";
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -451,7 +172,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
             else
               Expanded(
                 child: RefreshIndicator(
-                  onRefresh: _loadDashboard,
+                  onRefresh: () => _loadDashboard(silent: true),
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
                     children: [
@@ -460,8 +181,10 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
 
                       _sectionHeader(
                         title: "Quick Stats",
-                        ctaText: "Refresh",
-                        onTap: _loadDashboard,
+                        ctaText: _refreshing ? "Refreshing..." : "Refresh",
+                        onTap: _refreshing
+                            ? null
+                            : () => _loadDashboard(silent: true),
                       ),
                       const SizedBox(height: 10),
                       _buildQuickStatsRow(),
@@ -498,33 +221,27 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
 
                       const SizedBox(height: 18),
 
-                      _sectionHeader(
-                        title: "Today’s Interviews",
-                        ctaText: _todayInterviews.isEmpty ? null : "View",
-                        onTap: _todayInterviews.isEmpty
-                            ? null
-                            : () {
-                                // For now: open Applicants screen (you can create Interviews page later)
-                                Navigator.pushNamed(
-                                  context,
-                                  AppRoutes.employerJobs,
-                                );
-                              },
-                      ),
+                      _sectionHeader(title: "Today’s Interviews"),
                       const SizedBox(height: 10),
-                      _buildTodayInterviews(),
+                      _buildTodayInterviewsReal(),
 
                       const SizedBox(height: 18),
 
-                      _sectionHeader(title: "Job Performance (Last 7 days)"),
+                      _sectionHeader(title: "Performance (Last 7 days)"),
                       const SizedBox(height: 10),
-                      _buildPerformance(),
+                      _buildPerformanceReal(),
+
+                      const SizedBox(height: 18),
+
+                      _sectionHeader(title: "Top Jobs"),
+                      const SizedBox(height: 10),
+                      _buildTopJobsReal(),
 
                       const SizedBox(height: 18),
 
                       _sectionHeader(title: "Action Needed"),
                       const SizedBox(height: 10),
-                      _buildActionNeeded(),
+                      _buildActionNeededReal(),
                     ],
                   ),
                 ),
@@ -535,7 +252,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
           final res = await Navigator.pushNamed(context, AppRoutes.createJob);
-          if (res == true) await _loadDashboard();
+          if (res == true) await _loadDashboard(silent: true);
         },
         backgroundColor: _primary,
         foregroundColor: Colors.white,
@@ -551,7 +268,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // TOP HEADER
+  // TOP HEADER (REAL NOTIFICATIONS)
   // ------------------------------------------------------------
   Widget _buildTopHeader(BuildContext scaffoldContext) {
     return Container(
@@ -584,18 +301,12 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
               ),
             ),
           ),
-
-          // Notifications
           InkWell(
-            onTap: () {
-              // You can create a notifications page later.
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text("Notifications page coming next"),
-                ),
-              );
-            },
             borderRadius: BorderRadius.circular(999),
+            onTap: () async {
+              await Navigator.pushNamed(context, AppRoutes.employerNotifications);
+              await _loadDashboard(silent: true);
+            },
             child: Stack(
               children: [
                 Container(
@@ -614,25 +325,25 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                 ),
                 if (_unreadNotifications > 0)
                   Positioned(
-                    right: 7,
-                    top: 7,
+                    right: 6,
+                    top: 6,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 6,
                         vertical: 2,
                       ),
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFEF4444),
-                        borderRadius: BorderRadius.all(Radius.circular(999)),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEF4444),
+                        borderRadius: BorderRadius.circular(999),
                       ),
                       child: Text(
                         _unreadNotifications > 99
                             ? "99+"
                             : _unreadNotifications.toString(),
                         style: const TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w900,
                           color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 10.5,
                         ),
                       ),
                     ),
@@ -649,23 +360,12 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   // COMPANY PROFILE ROW (REAL)
   // ------------------------------------------------------------
   Widget _buildCompanyProfileRow() {
-    final company = _company;
-
-    final name = (company?['name'] ?? 'Company').toString();
-    final verified = company?['is_verified'] == true;
-
-    final city = (company?['headquarters_city'] ?? '').toString().trim();
-    final state = (company?['headquarters_state'] ?? '').toString().trim();
-    final location = [city, state].where((e) => e.isNotEmpty).join(", ");
-
-    final logoUrl = (company?['logo_url'] ?? '').toString().trim();
-
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: _cardDeco(radius: _r20),
       child: Row(
         children: [
-          _companyAvatar(name: name, logoUrl: logoUrl),
+          _companyAvatar(),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -675,19 +375,19 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                   children: [
                     Expanded(
                       child: Text(
-                        name.isEmpty ? "Company" : name,
+                        _companyName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontSize: 15.5,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w900,
                           color: _text,
                           letterSpacing: -0.2,
                         ),
                       ),
                     ),
                     const SizedBox(width: 8),
-                    if (verified)
+                    if (_companyVerified)
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 10,
@@ -701,17 +401,14 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                         child: const Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
-                              Icons.check_circle,
-                              size: 14,
-                              color: _primary,
-                            ),
+                            Icon(Icons.check_circle,
+                                size: 14, color: _primary),
                             SizedBox(width: 6),
                             Text(
                               "Verified",
                               style: TextStyle(
                                 fontSize: 11.5,
-                                fontWeight: FontWeight.w800,
+                                fontWeight: FontWeight.w900,
                                 color: _primary,
                               ),
                             ),
@@ -723,20 +420,17 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    const Icon(
-                      Icons.location_on_outlined,
-                      size: 16,
-                      color: _muted,
-                    ),
+                    const Icon(Icons.location_on_outlined,
+                        size: 16, color: _muted),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        location.isEmpty ? "Assam, India" : location,
+                        _companyLocation,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontSize: 12.8,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w800,
                           color: _muted,
                         ),
                       ),
@@ -751,33 +445,30 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     );
   }
 
-  Widget _companyAvatar({required String name, required String logoUrl}) {
-    final letter = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : "C";
-
-    if (logoUrl.isNotEmpty) {
+  Widget _companyAvatar() {
+    if (_companyLogo.trim().isNotEmpty) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(999),
         child: Container(
           width: 52,
           height: 52,
           decoration: BoxDecoration(
-            color: const Color(0xFFF1F5F9),
             borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: _border),
+            border: Border.all(color: const Color(0xFFDBEAFE)),
+            color: const Color(0xFFEFF6FF),
           ),
           child: Image.network(
-            logoUrl,
+            _companyLogo,
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => _fallbackAvatar(letter),
+            errorBuilder: (_, __, ___) => const Icon(
+              Icons.apartment_rounded,
+              color: _primary,
+            ),
           ),
         ),
       );
     }
 
-    return _fallbackAvatar(letter);
-  }
-
-  Widget _fallbackAvatar(String letter) {
     return Container(
       width: 52,
       height: 52,
@@ -786,15 +477,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: const Color(0xFFDBEAFE)),
       ),
-      alignment: Alignment.center,
-      child: Text(
-        letter,
-        style: const TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.w900,
-          color: _primary,
-        ),
-      ),
+      child: const Icon(Icons.apartment_rounded, color: _primary),
     );
   }
 
@@ -813,13 +496,13 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
             title,
             style: const TextStyle(
               fontSize: 15.5,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w900,
               color: _text,
               letterSpacing: -0.2,
             ),
           ),
         ),
-        if (ctaText != null && onTap != null)
+        if (ctaText != null)
           InkWell(
             onTap: onTap,
             borderRadius: BorderRadius.circular(999),
@@ -827,10 +510,10 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
               child: Text(
                 ctaText,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12.5,
-                  fontWeight: FontWeight.w800,
-                  color: _primary,
+                  fontWeight: FontWeight.w900,
+                  color: onTap == null ? const Color(0xFF94A3B8) : _primary,
                 ),
               ),
             ),
@@ -844,7 +527,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   // ------------------------------------------------------------
   Widget _buildQuickStatsRow() {
     return SizedBox(
-      height: 132,
+      height: 122,
       child: ListView(
         scrollDirection: Axis.horizontal,
         children: [
@@ -852,21 +535,21 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
             icon: Icons.work_outline,
             value: _activeJobs.toString(),
             label: "Active Jobs",
-            hint: "Total: $_totalJobs",
+            hint: "$_totalJobs total",
           ),
           const SizedBox(width: 12),
           _quickStatCard(
             icon: Icons.people_outline,
             value: _totalApplicants.toString(),
             label: "Applicants",
-            hint: "Last 24h: $_applicants24h",
+            hint: "+$_applicants24h in 24h",
           ),
           const SizedBox(width: 12),
           _quickStatCard(
             icon: Icons.visibility_outlined,
             value: _totalViews.toString(),
-            label: "Total Views",
-            hint: "Last 7d: $_views7d",
+            label: "Views",
+            hint: "All time",
           ),
         ],
       ),
@@ -880,7 +563,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     required String hint,
   }) {
     return Container(
-      width: 168,
+      width: 160,
       padding: const EdgeInsets.all(14),
       decoration: _cardDeco(radius: _r20),
       child: Column(
@@ -889,8 +572,8 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
           Row(
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: 38,
+                height: 38,
                 decoration: BoxDecoration(
                   color: const Color(0xFFEFF6FF),
                   borderRadius: BorderRadius.circular(14),
@@ -899,8 +582,23 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                 child: Icon(icon, color: _primary, size: 20),
               ),
               const Spacer(),
-              const Icon(Icons.chevron_right_rounded,
-                  color: Color(0xFF94A3B8)),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: _border),
+                ),
+                child: Text(
+                  hint,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    color: _muted,
+                  ),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -922,24 +620,13 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
               color: _muted,
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            hint,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w800,
-              color: Color(0xFF94A3B8),
-            ),
-          ),
         ],
       ),
     );
   }
 
   // ------------------------------------------------------------
-  // PRIMARY ACTIONS
+  // PRIMARY ACTIONS (REAL NAV)
   // ------------------------------------------------------------
   Widget _buildPrimaryActionsGrid() {
     return GridView.count(
@@ -955,14 +642,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
           label: "Post a Job",
           onTap: () async {
             final res = await Navigator.pushNamed(context, AppRoutes.createJob);
-            if (res == true) await _loadDashboard();
-          },
-        ),
-        _actionTile(
-          icon: Icons.people_outline,
-          label: "View Applicants",
-          onTap: () {
-            Navigator.pushNamed(context, AppRoutes.employerJobs);
+            if (res == true) await _loadDashboard(silent: true);
           },
         ),
         _actionTile(
@@ -973,10 +653,18 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
           },
         ),
         _actionTile(
-          icon: Icons.star_border_rounded,
-          label: "Top Jobs",
+          icon: Icons.people_outline,
+          label: "Applicants",
           onTap: () {
-            _showTopJobsBottomSheet();
+            Navigator.pushNamed(context, AppRoutes.employerJobs);
+          },
+        ),
+        _actionTile(
+          icon: Icons.notifications_none_outlined,
+          label: "Notifications",
+          onTap: () async {
+            await Navigator.pushNamed(context, AppRoutes.employerNotifications);
+            await _loadDashboard(silent: true);
           },
         ),
       ],
@@ -1014,7 +702,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontSize: 13.5,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w900,
                   color: _text,
                 ),
               ),
@@ -1048,7 +736,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
             if (i != _recentApplicants.length - 1)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 10),
-                child: Divider(height: 1, color: Color(0xFFE6E8EC)),
+                child: Divider(height: 1, color: _border),
               ),
           ],
           const SizedBox(height: 10),
@@ -1068,8 +756,8 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                 ),
               ),
               child: const Text(
-                "View All Applicants",
-                style: TextStyle(fontWeight: FontWeight.w800),
+                "View All",
+                style: TextStyle(fontWeight: FontWeight.w900),
               ),
             ),
           ),
@@ -1097,13 +785,13 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
           AppRoutes.jobApplicants,
           arguments: listingId,
         );
-        await _loadDashboard();
+        await _loadDashboard(silent: true);
       },
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 10),
         child: Row(
           children: [
-            _circleLetterAvatar(name),
+            _avatarLetter(name),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -1126,7 +814,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                     style: const TextStyle(
                       fontSize: 12.5,
                       color: _muted,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                 ],
@@ -1142,8 +830,8 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     );
   }
 
-  Widget _circleLetterAvatar(String name) {
-    final letter = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : "C";
+  Widget _avatarLetter(String name) {
+    final ch = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : "C";
 
     return Container(
       width: 46,
@@ -1155,7 +843,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
       ),
       alignment: Alignment.center,
       child: Text(
-        letter,
+        ch,
         style: const TextStyle(
           fontSize: 16,
           fontWeight: FontWeight.w900,
@@ -1252,9 +940,6 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     final applicants = _toInt(job['applications_count']);
     final views = _toInt(job['views_count']);
 
-    final salaryMin = job['salary_min'];
-    final salaryMax = job['salary_max'];
-
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
@@ -1282,8 +967,6 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
             ],
           ),
           const SizedBox(height: 8),
-
-          // location + type
           Row(
             children: [
               const Icon(Icons.location_on_outlined, size: 16, color: _muted),
@@ -1295,7 +978,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w800,
                     color: _muted,
                   ),
                 ),
@@ -1304,7 +987,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                 " • ",
                 style: TextStyle(
                   fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w800,
                   color: _muted,
                 ),
               ),
@@ -1312,39 +995,13 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                 jobType,
                 style: const TextStyle(
                   fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w800,
                   color: _muted,
                 ),
               ),
             ],
           ),
-
-          const SizedBox(height: 8),
-
-          // salary
-          Row(
-            children: [
-              const Icon(Icons.currency_rupee_rounded,
-                  size: 16, color: _muted),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  _salaryText(salaryMin, salaryMax),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF334155),
-                  ),
-                ),
-              ),
-            ],
-          ),
-
           const SizedBox(height: 10),
-
-          // posted + applicants + views
           Row(
             children: [
               const Icon(Icons.access_time, size: 16, color: _muted),
@@ -1353,7 +1010,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                 postedAt == null ? "Recently posted" : _timeAgo(postedAt),
                 style: const TextStyle(
                   fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w800,
                   color: _muted,
                 ),
               ),
@@ -1361,7 +1018,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                 " • ",
                 style: TextStyle(
                   fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w800,
                   color: _muted,
                 ),
               ),
@@ -1371,7 +1028,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                 "$applicants applicants",
                 style: const TextStyle(
                   fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w800,
                   color: _muted,
                 ),
               ),
@@ -1379,7 +1036,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                 " • ",
                 style: TextStyle(
                   fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w800,
                   color: _muted,
                 ),
               ),
@@ -1389,36 +1046,35 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                 "$views views",
                 style: const TextStyle(
                   fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w800,
                   color: _muted,
                 ),
               ),
             ],
           ),
-
           const SizedBox(height: 12),
-
           Row(
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () async {
-                    await Navigator.pushNamed(
-                      context,
-                      AppRoutes.jobApplicants,
-                      arguments: jobId,
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          "Edit Job will be added after Applicants Pipeline",
+                        ),
+                      ),
                     );
-                    await _loadDashboard();
                   },
-                  icon: const Icon(Icons.people_outline, size: 18),
+                  icon: const Icon(Icons.edit_outlined, size: 18),
                   label: const Text(
-                    "Applicants",
+                    "Edit",
                     style: TextStyle(fontWeight: FontWeight.w900),
                   ),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: _primary,
-                    backgroundColor: const Color(0xFFEFF6FF),
-                    side: const BorderSide(color: Color(0xFFBFDBFE)),
+                    foregroundColor: _text,
+                    backgroundColor: const Color(0xFFF8FAFC),
+                    side: const BorderSide(color: _border),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
@@ -1429,18 +1085,23 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
               const SizedBox(width: 10),
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.pushNamed(context, AppRoutes.employerJobs);
+                  onPressed: () async {
+                    await Navigator.pushNamed(
+                      context,
+                      AppRoutes.jobApplicants,
+                      arguments: jobId,
+                    );
+                    await _loadDashboard(silent: true);
                   },
-                  icon: const Icon(Icons.work_outline, size: 18),
+                  icon: const Icon(Icons.people_outline, size: 18),
                   label: const Text(
-                    "Manage",
+                    "Applicants",
                     style: TextStyle(fontWeight: FontWeight.w900),
                   ),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: _text,
-                    backgroundColor: const Color(0xFFF8FAFC),
-                    side: const BorderSide(color: _border),
+                    foregroundColor: _primary,
+                    backgroundColor: const Color(0xFFEFF6FF),
+                    side: const BorderSide(color: Color(0xFFBFDBFE)),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
@@ -1499,22 +1160,14 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // TODAY'S INTERVIEWS (REAL)
+  // TODAY INTERVIEWS (REAL)
   // ------------------------------------------------------------
-  Widget _buildTodayInterviews() {
-    if (_loadingInterviews) {
-      return Container(
-        padding: const EdgeInsets.all(14),
-        decoration: _cardDeco(radius: _r20),
-        child: const Center(child: CircularProgressIndicator()),
-      );
-    }
-
+  Widget _buildTodayInterviewsReal() {
     if (_todayInterviews.isEmpty) {
       return _softEmptyCard(
         icon: Icons.calendar_month_outlined,
-        title: "No interviews today",
-        subtitle: "Scheduled interviews will appear here automatically.",
+        title: "No interviews scheduled today",
+        subtitle: "When you schedule interviews, they will appear here.",
       );
     }
 
@@ -1528,7 +1181,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
             if (i != _todayInterviews.length - 1)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 10),
-                child: Divider(height: 1, color: Color(0xFFE6E8EC)),
+                child: Divider(height: 1, color: _border),
               ),
           ],
         ],
@@ -1537,26 +1190,24 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   Widget _interviewTile(Map<String, dynamic> row) {
-    final scheduledAt = DateTime.tryParse((row['scheduled_at'] ?? '').toString())
-        ?.toLocal();
-
+    final scheduledAt = DateTime.tryParse((row['scheduled_at'] ?? '').toString());
     final type = (row['interview_type'] ?? 'video').toString().toLowerCase();
-    final isOnline = type == 'video';
-
     final duration = _toInt(row['duration_minutes']);
-    final meetingLink = (row['meeting_link'] ?? '').toString().trim();
-    final location = (row['location_address'] ?? '').toString().trim();
+    final meetingLink = (row['meeting_link'] ?? '').toString();
+    final location = (row['location_address'] ?? '').toString();
 
-    final listingObj = (row['job_applications_listings'] ?? {}) as Map;
-    final jobObj = (listingObj['job_listings'] ?? {}) as Map;
-    final appObj = (listingObj['job_applications'] ?? {}) as Map;
+    final listingWrap = (row['job_applications_listings'] ?? {}) as Map;
+    final jobWrap = (listingWrap['job_listings'] ?? {}) as Map;
+    final appWrap = (listingWrap['job_applications'] ?? {}) as Map;
 
-    final candidate = (appObj['name'] ?? 'Candidate').toString();
-    final jobTitle = (jobObj['job_title'] ?? 'Job').toString();
+    final candidateName = (appWrap['name'] ?? 'Candidate').toString();
+    final jobTitle = (jobWrap['job_title'] ?? 'Job').toString();
+
+    final isOnline = type.contains('video') || meetingLink.trim().isNotEmpty;
 
     final timeText = scheduledAt == null
-        ? "Scheduled"
-        : _formatTime(scheduledAt);
+        ? "Today"
+        : "${_hhmm(scheduledAt)} • ${duration <= 0 ? 30 : duration} min";
 
     final modeText = isOnline ? "Online" : "In-person";
 
@@ -1581,38 +1232,41 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
+              Row(
                 children: [
-                  _pill(
-                    icon: Icons.schedule_rounded,
-                    text: timeText,
-                    bg: const Color(0xFFEFF6FF),
-                    fg: _primary,
-                  ),
-                  _pill(
-                    icon: isOnline
-                        ? Icons.wifi_tethering_rounded
-                        : Icons.place_outlined,
-                    text: modeText,
-                    bg: const Color(0xFFF1F5F9),
-                    fg: const Color(0xFF334155),
-                  ),
-                  if (duration > 0)
-                    _pill(
-                      icon: Icons.timelapse_rounded,
-                      text: "${duration}m",
-                      bg: const Color(0xFFF8FAFC),
-                      fg: const Color(0xFF475569),
+                  Text(
+                    timeText,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w900,
+                      color: _primary,
                     ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: _border),
+                    ),
+                    child: Text(
+                      modeText,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w900,
+                        color: _muted,
+                      ),
+                    ),
+                  ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 5),
               Text(
-                candidate,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                candidateName,
                 style: const TextStyle(
                   fontSize: 14.5,
                   fontWeight: FontWeight.w900,
@@ -1622,59 +1276,17 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
               const SizedBox(height: 2),
               Text(
                 jobTitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w800,
                   color: _muted,
                 ),
               ),
-              if (isOnline && meetingLink.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            "Open meeting link (url_launcher) coming next",
-                          ),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.link_rounded, size: 18),
-                    label: const Text(
-                      "Open Link",
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _primary,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-              if (!isOnline && location.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(
-                  location,
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF334155),
-                  ),
-                ),
-              ],
+              const SizedBox(height: 10),
+              if (isOnline && meetingLink.trim().isNotEmpty)
+                _smallInfo("Meeting link saved")
+              else if (!isOnline && location.trim().isNotEmpty)
+                _smallInfo("Location saved"),
             ],
           ),
         ),
@@ -1682,33 +1294,21 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     );
   }
 
-  Widget _pill({
-    required IconData icon,
-    required String text,
-    required Color bg,
-    required Color fg,
-  }) {
+  Widget _smallInfo(String t) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: fg.withOpacity(0.10)),
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _border),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: fg),
-          const SizedBox(width: 6),
-          Text(
-            text,
-            style: TextStyle(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w900,
-              color: fg,
-            ),
-          ),
-        ],
+      child: Text(
+        t,
+        style: const TextStyle(
+          color: _muted,
+          fontWeight: FontWeight.w800,
+          fontSize: 12,
+        ),
       ),
     );
   }
@@ -1716,30 +1316,28 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   // ------------------------------------------------------------
   // PERFORMANCE (REAL)
   // ------------------------------------------------------------
-  Widget _buildPerformance() {
-    if (_loadingPerformance) {
-      return Container(
-        padding: const EdgeInsets.all(14),
-        decoration: _cardDeco(radius: _r20),
-        child: const Center(child: CircularProgressIndicator()),
-      );
-    }
+  Widget _buildPerformanceReal() {
+    final days = (_perf7d['days'] ?? []) as List;
 
-    if (_perfDays.isEmpty) {
+    if (days.isEmpty) {
       return _softEmptyCard(
         icon: Icons.insights_outlined,
-        title: "No performance data yet",
-        subtitle: "Views and applications will show here automatically.",
+        title: "No data yet",
+        subtitle: "Views and applications will appear after your jobs get traffic.",
       );
     }
 
-    final maxV = _perfDays
-        .map((e) => _toInt(e['views']))
-        .fold<int>(1, (a, b) => a > b ? a : b);
+    int totalViews = _toInt(_perf7d['total_views']);
+    int totalApps = _toInt(_perf7d['total_applications']);
 
-    final maxA = _perfDays
-        .map((e) => _toInt(e['apps']))
-        .fold<int>(1, (a, b) => a > b ? a : b);
+    // simple bars
+    int maxV = 1;
+    int maxA = 1;
+    for (final d in days) {
+      if (d is! Map) continue;
+      maxV = (d['views'] as int) > maxV ? (d['views'] as int) : maxV;
+      maxA = (d['applications'] as int) > maxA ? (d['applications'] as int) : maxA;
+    }
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -1747,79 +1345,103 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // summary row
+          _miniMetricsRow(
+            leftLabel: "Views",
+            leftValue: totalViews.toString(),
+            rightLabel: "Applications",
+            rightValue: totalApps.toString(),
+          ),
+          const SizedBox(height: 14),
           Row(
             children: [
-              Expanded(
-                child: _metricMini(
-                  label: "Views (7d)",
-                  value: _views7d.toString(),
+              const Expanded(
+                child: Text(
+                  "Last 7 days",
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: _text,
+                  ),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _metricMini(
-                  label: "Applications (7d)",
-                  value: _apps7d.toString(),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: _border),
+                ),
+                child: const Text(
+                  "Views vs Apps",
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: _muted,
+                    fontSize: 11.5,
+                  ),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 12),
+          SizedBox(
+            height: 110,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: List.generate(days.length, (i) {
+                final d = days[i] as Map;
+                final date = DateTime.tryParse((d['date'] ?? '').toString());
+                final views = _toInt(d['views']);
+                final apps = _toInt(d['applications']);
 
-          // minimal bars (no external chart lib)
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: _border),
-            ),
-            child: Column(
-              children: _perfDays.map((d) {
-                final date = d['date'] as DateTime;
-                final v = _toInt(d['views']);
-                final a = _toInt(d['apps']);
+                final vH = (views / maxV) * 90;
+                final aH = (apps / maxA) * 90;
 
-                final vw = maxV == 0 ? 0.0 : (v / maxV);
-                final aw = maxA == 0 ? 0.0 : (a / maxA);
+                final label = date == null ? "" : "${date.day}/${date.month}";
 
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 44,
-                        child: Text(
-                          _dayShort(date),
-                          style: const TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w900,
-                            color: Color(0xFF64748B),
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Column(
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
-                            _miniBar(
-                              label: "V $v",
-                              fill: vw,
-                              fg: _primary,
+                            Expanded(
+                              child: Container(
+                                height: vH < 6 ? 6 : vH,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFDBEAFE),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
                             ),
-                            const SizedBox(height: 6),
-                            _miniBar(
-                              label: "A $a",
-                              fill: aw,
-                              fg: const Color(0xFF16A34A),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Container(
+                                height: aH < 6 ? 6 : aH,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF93C5FD),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
                             ),
                           ],
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 6),
+                        Text(
+                          label,
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFF94A3B8),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 );
-              }).toList(),
+              }),
             ),
           ),
         ],
@@ -1827,41 +1449,17 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     );
   }
 
-  Widget _miniBar({
-    required String label,
-    required double fill,
-    required Color fg,
+  Widget _miniMetricsRow({
+    required String leftLabel,
+    required String leftValue,
+    required String rightLabel,
+    required String rightValue,
   }) {
-    final f = fill.clamp(0.0, 1.0);
-
     return Row(
       children: [
-        SizedBox(
-          width: 42,
-          child: Text(
-            label,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w900,
-              color: Color(0xFF334155),
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: Container(
-              height: 8,
-              color: const Color(0xFFE2E8F0),
-              alignment: Alignment.centerLeft,
-              child: FractionallySizedBox(
-                widthFactor: f,
-                child: Container(color: fg),
-              ),
-            ),
-          ),
-        ),
+        Expanded(child: _metricMini(label: leftLabel, value: leftValue)),
+        const SizedBox(width: 12),
+        Expanded(child: _metricMini(label: rightLabel, value: rightValue)),
       ],
     );
   }
@@ -1881,7 +1479,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
             label,
             style: const TextStyle(
               fontSize: 12.5,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w900,
               color: _muted,
             ),
           ),
@@ -1900,65 +1498,167 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // ACTION NEEDED (REAL)
+  // TOP JOBS (REAL)
   // ------------------------------------------------------------
-  Widget _buildActionNeeded() {
-    if (_jobs.isEmpty) {
+  Widget _buildTopJobsReal() {
+    if (_topJobs.isEmpty) {
       return _softEmptyCard(
-        icon: Icons.check_circle_outline,
-        title: "Nothing to review",
-        subtitle: "Once you post jobs and get applicants, tasks appear here.",
+        icon: Icons.star_outline,
+        title: "No job performance yet",
+        subtitle: "Once applicants start applying, top jobs will appear here.",
       );
     }
 
-    final items = <Widget>[];
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: _cardDeco(radius: _r20),
+      child: Column(
+        children: [
+          for (int i = 0; i < _topJobs.length; i++) ...[
+            _topJobTile(_topJobs[i]),
+            if (i != _topJobs.length - 1)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 10),
+                child: Divider(height: 1, color: _border),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
 
-    if (_pendingReviewCount > 0) {
-      items.add(
+  Widget _topJobTile(Map<String, dynamic> j) {
+    final id = (j['id'] ?? '').toString();
+    final title = (j['job_title'] ?? 'Job').toString();
+    final apps = _toInt(j['applications_count']);
+    final views = _toInt(j['views_count']);
+    final status = (j['status'] ?? 'active').toString();
+
+    return InkWell(
+      onTap: () async {
+        await Navigator.pushNamed(context, AppRoutes.jobApplicants, arguments: id);
+        await _loadDashboard(silent: true);
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: _border),
+              ),
+              child: const Icon(Icons.work_outline, color: _primary),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      color: _text,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "$apps applicants • $views views • ${status.toUpperCase()}",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _muted,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: Color(0xFF94A3B8)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // ACTION NEEDED (REAL COMPUTED)
+  // ------------------------------------------------------------
+  Widget _buildActionNeededReal() {
+    final waitingReview = _recentApplicants
+        .where((a) =>
+            (a['application_status'] ?? 'applied')
+                .toString()
+                .toLowerCase() ==
+            'applied')
+        .length;
+
+    final expiringSoon = _jobs.where((j) {
+      final exp = DateTime.tryParse((j['expires_at'] ?? '').toString());
+      if (exp == null) return false;
+      final diff = exp.difference(DateTime.now()).inHours;
+      return diff >= 0 && diff <= 48;
+    }).length;
+
+    final paused = _pausedJobs;
+
+    final List<Widget> cards = [];
+
+    if (waitingReview > 0) {
+      cards.add(
         _actionNeededCard(
           icon: Icons.people_outline,
-          title: "$_pendingReviewCount applicants waiting for review",
-          buttonText: "Review now",
-          onTap: () {
-            Navigator.pushNamed(context, AppRoutes.employerJobs);
-          },
+          title: "$waitingReview applicants waiting for review",
+          buttonText: "Review",
+          onTap: () => Navigator.pushNamed(context, AppRoutes.employerJobs),
         ),
       );
     }
 
-    if (_expiringJobsCount > 0) {
-      items.add(
+    if (expiringSoon > 0) {
+      cards.add(
         _actionNeededCard(
           icon: Icons.warning_amber_outlined,
-          title: "$_expiringJobsCount job posts expiring soon",
+          title: "$expiringSoon job posts expiring soon",
           buttonText: "Manage jobs",
-          onTap: () {
-            Navigator.pushNamed(context, AppRoutes.employerJobs);
-          },
+          onTap: () => Navigator.pushNamed(context, AppRoutes.employerJobs),
         ),
       );
     }
 
-    // Always show a small status card (clean UX)
-    if (items.isEmpty) {
-      items.add(
+    if (paused > 0) {
+      cards.add(
         _actionNeededCard(
-          icon: Icons.check_circle_outline,
-          title: "All caught up",
-          buttonText: "View jobs",
-          onTap: () {
-            Navigator.pushNamed(context, AppRoutes.employerJobs);
-          },
+          icon: Icons.pause_circle_outline,
+          title: "$paused jobs are paused",
+          buttonText: "Resume",
+          onTap: () => Navigator.pushNamed(context, AppRoutes.employerJobs),
         ),
+      );
+    }
+
+    if (cards.isEmpty) {
+      return _softEmptyCard(
+        icon: Icons.check_circle_outline,
+        title: "All good",
+        subtitle: "No pending actions right now.",
       );
     }
 
     return Column(
       children: [
-        for (int i = 0; i < items.length; i++) ...[
-          items[i],
-          if (i != items.length - 1) const SizedBox(height: 12),
-        ],
+        for (int i = 0; i < cards.length; i++) ...[
+          cards[i],
+          if (i != cards.length - 1) const SizedBox(height: 12),
+        ]
       ],
     );
   }
@@ -2025,113 +1725,9 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // TOP JOBS (REAL) - bottom sheet
-  // ------------------------------------------------------------
-  void _showTopJobsBottomSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
-      builder: (_) {
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 44,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE2E8F0),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    "Top Performing Jobs",
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w900,
-                      color: _text,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                if (_topJobs.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Text(
-                      "No top jobs yet.",
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: _muted,
-                      ),
-                    ),
-                  )
-                else
-                  Flexible(
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: _topJobs.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (_, i) {
-                        final j = _topJobs[i];
-                        final title = (j['job_title'] ?? 'Job').toString();
-                        final applicants = _toInt(j['applications_count']);
-                        final views = _toInt(j['views_count']);
-                        final status = (j['status'] ?? 'active').toString();
-
-                        return ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w900,
-                              color: _text,
-                            ),
-                          ),
-                          subtitle: Text(
-                            "$applicants applicants • $views views • ${status.toUpperCase()}",
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: _muted,
-                            ),
-                          ),
-                          trailing: const Icon(Icons.chevron_right_rounded),
-                          onTap: () {
-                            Navigator.pop(context);
-                            Navigator.pushNamed(
-                              context,
-                              AppRoutes.employerJobs,
-                            );
-                          },
-                        );
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  // ------------------------------------------------------------
-  // DRAWER
+  // DRAWER (REAL NAV)
   // ------------------------------------------------------------
   Widget _newEmployerDrawer() {
-    final companyName = (_company?['name'] ?? 'Company').toString();
-
     return Drawer(
       backgroundColor: Colors.white,
       child: SafeArea(
@@ -2146,17 +1742,14 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
               ),
               child: Row(
                 children: [
-                  _companyAvatar(
-                    name: companyName,
-                    logoUrl: (_company?['logo_url'] ?? '').toString(),
-                  ),
+                  _companyAvatar(),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          companyName,
+                          _companyName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -2171,7 +1764,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                           "Employer Account",
                           style: TextStyle(
                             fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w800,
                             color: _muted,
                           ),
                         ),
@@ -2207,7 +1800,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                         context,
                         AppRoutes.createJob,
                       );
-                      if (res == true) await _loadDashboard();
+                      if (res == true) await _loadDashboard(silent: true);
                     },
                   ),
                   _drawerItem(
@@ -2216,6 +1809,18 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                     onTap: () {
                       Navigator.pop(context);
                       Navigator.pushNamed(context, AppRoutes.employerJobs);
+                    },
+                  ),
+                  _drawerItem(
+                    icon: Icons.notifications_none_outlined,
+                    title: "Notifications",
+                    onTap: () async {
+                      Navigator.pop(context);
+                      await Navigator.pushNamed(
+                        context,
+                        AppRoutes.employerNotifications,
+                      );
+                      await _loadDashboard(silent: true);
                     },
                   ),
                   const Padding(
@@ -2303,7 +1908,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // BOTTOM NAV (REAL ROUTES)
+  // BOTTOM NAV (REAL FOR FIRST 3, MESSAGES MOCK)
   // ------------------------------------------------------------
   Widget _buildBottomNav() {
     return Container(
@@ -2316,17 +1921,19 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
         onTap: (i) {
           setState(() => _bottomIndex = i);
 
-          if (i == 1) {
+          if (i == 0) {
+            // dashboard (stay)
+          } else if (i == 1) {
             Navigator.pushNamed(context, AppRoutes.employerJobs);
           } else if (i == 2) {
             Navigator.pushNamed(context, AppRoutes.employerJobs);
           } else if (i == 3) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Messages coming next")),
+              const SnackBar(content: Text("Messages will be added next")),
             );
           } else if (i == 4) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Profile coming next")),
+              const SnackBar(content: Text("Employer profile will be added next")),
             );
           }
         },
@@ -2426,7 +2033,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                   subtitle,
                   style: const TextStyle(
                     fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w800,
                     color: _muted,
                     height: 1.3,
                   ),
@@ -2437,38 +2044,6 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
         ],
       ),
     );
-  }
-
-  String _salaryText(dynamic min, dynamic max) {
-    int? toInt(dynamic v) {
-      if (v == null) return null;
-      if (v is int) return v;
-      return int.tryParse(v.toString());
-    }
-
-    final mn = toInt(min);
-    final mx = toInt(max);
-
-    // Your requirement: show as "5000 - 10000 / month"
-    if (mn != null && mx != null) return "$mn - $mx / month";
-    if (mn != null) return "$mn / month";
-    return "Salary not disclosed";
-  }
-
-  String _formatTime(DateTime d) {
-    int h = d.hour;
-    final m = d.minute.toString().padLeft(2, '0');
-
-    final ampm = h >= 12 ? "PM" : "AM";
-    h = h % 12;
-    if (h == 0) h = 12;
-
-    return "$h:$m $ampm";
-  }
-
-  String _dayShort(DateTime d) {
-    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    return days[(d.weekday - 1).clamp(0, 6)];
   }
 
   String _timeAgo(dynamic date) {
@@ -2484,6 +2059,16 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     if (diff.inDays == 1) return '1d ago';
     return '${diff.inDays}d ago';
+  }
+
+  String _hhmm(DateTime d) {
+    final h = d.hour;
+    final m = d.minute.toString().padLeft(2, '0');
+
+    final ampm = h >= 12 ? "PM" : "AM";
+    final hh = (h % 12 == 0) ? 12 : (h % 12);
+
+    return "$hh:$m $ampm";
   }
 
   int _toInt(dynamic v) {
