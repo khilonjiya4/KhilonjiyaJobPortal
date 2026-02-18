@@ -1,18 +1,17 @@
-import 'dart:math';
-
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter/foundation.dart';
+// lib/presentation/company/jobs/job_applicants_screen.dart
 import 'package:flutter/material.dart';
-import 'package:sizer/sizer.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
+
+import '../../../core/ui/khilonjiya_ui.dart';
+import '../../../services/employer_applicants_service.dart';
 
 class JobApplicantsScreen extends StatefulWidget {
   final String jobId;
+  final String companyId;
 
   const JobApplicantsScreen({
     Key? key,
     required this.jobId,
+    required this.companyId,
   }) : super(key: key);
 
   @override
@@ -20,263 +19,416 @@ class JobApplicantsScreen extends StatefulWidget {
 }
 
 class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
-  final SupabaseClient _client = Supabase.instance.client;
+  final EmployerApplicantsService _service = EmployerApplicantsService();
 
   bool _loading = true;
-  String? _error;
+  bool _busy = false;
 
   List<Map<String, dynamic>> _rows = [];
 
-  // ------------------------------------------------------------
-  // STORAGE CONFIG (MUST MATCH JobSeekerHomeService)
-  // ------------------------------------------------------------
-  static const String _bucketJobFiles = 'job-files';
-  static const int _signedUrlExpirySeconds = 60 * 60; // 1 hour
+  // Filters
+  String _filter = 'all';
+  final _search = TextEditingController();
 
-  // ------------------------------------------------------------
-  // FLUENT LIGHT PALETTE
-  // ------------------------------------------------------------
-  static const _bg = Color(0xFFF6F7FB);
-  static const _card = Colors.white;
-  static const _text = Color(0xFF0F172A);
-  static const _muted = Color(0xFF64748B);
-  static const _line = Color(0xFFE6EAF2);
-  static const _primary = Color(0xFF2563EB);
+  // UI tokens
+  static const Color _bg = Color(0xFFF7F8FA);
+  static const Color _border = Color(0xFFE6E8EC);
+  static const Color _text = Color(0xFF111827);
+  static const Color _muted = Color(0xFF6B7280);
+  static const Color _primary = Color(0xFF2563EB);
 
   @override
   void initState() {
     super.initState();
-    _loadApplicants();
+    _load();
   }
 
-  // ------------------------------------------------------------
-  // AUTH
-  // ------------------------------------------------------------
-  String _userId() {
-    final user = _client.auth.currentUser;
-    if (user == null) throw Exception("Session expired");
-    return user.id;
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
   }
 
-  // ------------------------------------------------------------
-  // STORAGE HELPERS
-  // ------------------------------------------------------------
-  bool _looksLikeHttpUrl(String s) {
-    final v = s.trim().toLowerCase();
-    return v.startsWith('http://') || v.startsWith('https://');
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg)),
+    );
   }
 
-  Future<String> _toSignedUrlIfNeeded(String raw) async {
-    final v = raw.trim();
-    if (v.isEmpty) return '';
-    if (_looksLikeHttpUrl(v)) return v;
+  Future<void> _load() async {
+    if (!mounted) return;
+    setState(() => _loading = true);
 
     try {
-      final signed = await _client.storage.from(_bucketJobFiles).createSignedUrl(
-            v,
-            _signedUrlExpirySeconds,
-          );
-      return signed;
-    } catch (_) {
-      return v;
-    }
-  }
-
-  // ------------------------------------------------------------
-  // SECURITY: ENSURE THIS EMPLOYER OWNS THIS JOB
-  // ------------------------------------------------------------
-  Future<bool> _ensureJobOwner() async {
-    final userId = _userId();
-
-    final job = await _client
-        .from('job_listings')
-        .select('id, employer_id')
-        .eq('id', widget.jobId)
-        .maybeSingle();
-
-    if (job == null) return false;
-
-    final employerId = (job['employer_id'] ?? '').toString();
-    return employerId == userId;
-  }
-
-  // ------------------------------------------------------------
-  // LOAD
-  // ------------------------------------------------------------
-  Future<void> _loadApplicants() async {
-    try {
-      if (!mounted) return;
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
-
-      final user = _client.auth.currentUser;
-      if (user == null) {
-        if (!mounted) return;
-        setState(() {
-          _loading = false;
-          _error = "Session expired. Please login again.";
-        });
-        return;
-      }
-
-      // 🔒 Security check
-      final ok = await _ensureJobOwner();
-      if (!ok) {
-        if (!mounted) return;
-        setState(() {
-          _loading = false;
-          _error = "You are not allowed to view applicants for this job.";
-        });
-        return;
-      }
-
-      final res = await _client
-          .from('job_applications_listings')
-          .select('''
-            id,
-            listing_id,
-            application_id,
-            applied_at,
-            application_status,
-            employer_notes,
-            interview_date,
-            user_id,
-
-            job_applications (
-              id,
-              user_id,
-              created_at,
-              name,
-              phone,
-              email,
-              district,
-              address,
-              gender,
-              date_of_birth,
-              education,
-              experience_level,
-              experience_details,
-              skills,
-              expected_salary,
-              availability,
-              additional_info,
-              resume_file_name,
-              resume_file_url,
-              photo_file_name,
-              photo_file_url
-            )
-          ''')
-          .eq('listing_id', widget.jobId)
-          .order('applied_at', ascending: false);
-
-      final rows = List<Map<String, dynamic>>.from(res);
-
-      // convert storage paths -> signed urls for UI
-      for (final row in rows) {
-        final app = row['job_applications'];
-        if (app is! Map) continue;
-
-        final resumeRaw = (app['resume_file_url'] ?? '').toString().trim();
-        final photoRaw = (app['photo_file_url'] ?? '').toString().trim();
-
-        if (resumeRaw.isNotEmpty) {
-          app['resume_file_url'] = await _toSignedUrlIfNeeded(resumeRaw);
-        }
-        if (photoRaw.isNotEmpty) {
-          app['photo_file_url'] = await _toSignedUrlIfNeeded(photoRaw);
-        }
-      }
-
-      if (!mounted) return;
-
-      setState(() {
-        _rows = rows;
-        _loading = false;
-      });
+      await _service.ensureJobOwnerAndGetJob(widget.jobId);
+      _rows = await _service.fetchApplicantsForJob(widget.jobId);
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint("JobApplicantsScreen load error: $e");
-      }
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = "Failed to load applicants";
-      });
+      _rows = [];
+      _toast("Failed: ${e.toString()}");
     }
+
+    if (!mounted) return;
+    setState(() => _loading = false);
   }
 
   // ------------------------------------------------------------
-  // UPDATE STATUS + INSERT EVENT
+  // FILTERING
   // ------------------------------------------------------------
-  Future<void> _updateStatus(String listingRowId, String status) async {
-    try {
-      final userId = _userId();
+  List<Map<String, dynamic>> get _filtered {
+    final q = _search.text.trim().toLowerCase();
 
-      await _client
-          .from('job_applications_listings')
-          .update({'application_status': status})
-          .eq('id', listingRowId);
+    return _rows.where((r) {
+      final status = (r['application_status'] ?? 'applied')
+          .toString()
+          .toLowerCase();
 
-      // log event (schema has application_events)
-      try {
-        await _client.from('application_events').insert({
-          'job_application_listing_id': listingRowId,
-          'event_type': 'status_changed',
-          'actor_user_id': userId,
-          'notes': 'Status changed to $status',
-          'created_at': DateTime.now().toIso8601String(),
-        });
-      } catch (_) {}
+      if (_filter != 'all' && status != _filter) return false;
 
-      await _loadApplicants();
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Failed to update status")),
-      );
-    }
+      if (q.isEmpty) return true;
+
+      final app = (r['job_applications'] ?? {}) as Map;
+      final name = (app['name'] ?? '').toString().toLowerCase();
+      final phone = (app['phone'] ?? '').toString().toLowerCase();
+      final email = (app['email'] ?? '').toString().toLowerCase();
+      final skills = (app['skills'] ?? '').toString().toLowerCase();
+
+      return name.contains(q) ||
+          phone.contains(q) ||
+          email.contains(q) ||
+          skills.contains(q);
+    }).toList();
   }
 
   // ------------------------------------------------------------
   // ACTIONS
   // ------------------------------------------------------------
-  Future<void> _call(String phone) async {
-    final p = phone.trim();
-    if (p.isEmpty) return;
+  Future<void> _setStatus(Map<String, dynamic> row, String status) async {
+    if (_busy) return;
+    setState(() => _busy = true);
 
-    final uri = Uri.parse("tel:$p");
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
+    try {
+      await _service.updateApplicationStatus(
+        listingRowId: (row['id'] ?? '').toString(),
+        jobId: widget.jobId,
+        status: status,
+      );
+
+      row['application_status'] = status;
+      setState(() {});
+    } catch (e) {
+      _toast("Failed: ${e.toString()}");
     }
+
+    if (!mounted) return;
+    setState(() => _busy = false);
   }
 
-  Future<void> _email(String email) async {
-    final e = email.trim();
-    if (e.isEmpty) return;
+  Future<void> _scheduleInterview(Map<String, dynamic> row) async {
+    final picked = await _pickDateTime();
+    if (picked == null) return;
 
-    final uri = Uri.parse("mailto:$e");
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
+    if (_busy) return;
+    setState(() => _busy = true);
+
+    try {
+      await _service.scheduleInterview(
+        listingRowId: (row['id'] ?? '').toString(),
+        jobId: widget.jobId,
+        companyId: widget.companyId,
+        scheduledAt: picked,
+        durationMinutes: 30,
+        interviewType: 'video',
+      );
+
+      row['application_status'] = 'interview_scheduled';
+      row['interview_date'] = picked.toIso8601String();
+      setState(() {});
+      _toast("Interview scheduled");
+    } catch (e) {
+      _toast("Failed: ${e.toString()}");
     }
+
+    if (!mounted) return;
+    setState(() => _busy = false);
   }
 
-  Future<void> _openUrl(String url) async {
-    final u = url.trim();
-    if (u.isEmpty) return;
+  Future<DateTime?> _pickDateTime() async {
+    final now = DateTime.now();
 
-    final uri = Uri.tryParse(u);
-    if (uri == null) return;
+    final d = await showDatePicker(
+      context: context,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+      initialDate: now.add(const Duration(days: 1)),
+    );
+    if (d == null) return null;
 
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
+    final t = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: now.hour, minute: now.minute),
+    );
+    if (t == null) return null;
+
+    return DateTime(d.year, d.month, d.day, t.hour, t.minute);
   }
 
   // ------------------------------------------------------------
-  // UI
+  // MARK VIEWED
+  // ------------------------------------------------------------
+  Future<void> _markViewedIfNeeded(Map<String, dynamic> row) async {
+    final status =
+        (row['application_status'] ?? 'applied').toString().toLowerCase();
+    if (status != 'applied') return;
+
+    try {
+      await _service.markViewed(
+        listingRowId: (row['id'] ?? '').toString(),
+        jobId: widget.jobId,
+      );
+      row['application_status'] = 'viewed';
+      if (mounted) setState(() {});
+    } catch (_) {}
+  }
+
+  // ------------------------------------------------------------
+  // DETAILS SHEET
+  // ------------------------------------------------------------
+  void _openApplicant(Map<String, dynamic> row) async {
+    await _markViewedIfNeeded(row);
+
+    final app = (row['job_applications'] ?? {}) as Map;
+
+    final name = (app['name'] ?? 'Candidate').toString();
+    final phone = (app['phone'] ?? '').toString();
+    final email = (app['email'] ?? '').toString();
+    final district = (app['district'] ?? '').toString();
+    final edu = (app['education'] ?? '').toString();
+    final exp = (app['experience_level'] ?? '').toString();
+    final skills = (app['skills'] ?? '').toString();
+    final salary = (app['expected_salary'] ?? '').toString();
+    final notes = (row['employer_notes'] ?? '').toString();
+
+    final status =
+        (row['application_status'] ?? 'applied').toString().toLowerCase();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (_) {
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              16,
+              16,
+              MediaQuery.of(context).viewInsets.bottom + 16,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      _avatar(name),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          name,
+                          style: const TextStyle(
+                            fontSize: 16.5,
+                            fontWeight: FontWeight.w900,
+                            color: _text,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  _statusChip(status),
+                  const SizedBox(height: 12),
+
+                  _kv("Phone", phone.isEmpty ? "Not provided" : phone),
+                  _kv("Email", email.isEmpty ? "Not provided" : email),
+                  _kv("District", district.isEmpty ? "Not provided" : district),
+                  _kv("Education", edu.isEmpty ? "Not provided" : edu),
+                  _kv("Experience", exp.isEmpty ? "Not provided" : exp),
+                  _kv("Expected Salary",
+                      salary.isEmpty ? "Not provided" : salary),
+
+                  const SizedBox(height: 12),
+
+                  Text(
+                    "Skills",
+                    style: KhilonjiyaUI.hTitle.copyWith(fontSize: 14),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    skills.isEmpty ? "Not provided" : skills,
+                    style: KhilonjiyaUI.body.copyWith(
+                      color: const Color(0xFF475569),
+                      height: 1.45,
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  Text(
+                    "Employer Notes",
+                    style: KhilonjiyaUI.hTitle.copyWith(fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: _border),
+                    ),
+                    child: Text(
+                      notes.trim().isEmpty ? "No notes yet." : notes,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: _text,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _busy
+                              ? null
+                              : () async {
+                                  Navigator.pop(context);
+                                  await _scheduleInterview(row);
+                                },
+                          icon: const Icon(Icons.calendar_month_outlined),
+                          label: const Text(
+                            "Schedule",
+                            style: TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _primary,
+                            backgroundColor: const Color(0xFFEFF6FF),
+                            side: const BorderSide(color: Color(0xFFBFDBFE)),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _busy
+                              ? null
+                              : () async {
+                                  Navigator.pop(context);
+                                  await _setStatus(row, 'shortlisted');
+                                },
+                          icon: const Icon(Icons.star_border_rounded),
+                          label: const Text(
+                            "Shortlist",
+                            style: TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _text,
+                            backgroundColor: const Color(0xFFF8FAFC),
+                            side: const BorderSide(color: _border),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _busy
+                              ? null
+                              : () async {
+                                  Navigator.pop(context);
+                                  await _setStatus(row, 'selected');
+                                },
+                          icon: const Icon(Icons.check_circle_outline),
+                          label: const Text(
+                            "Select",
+                            style: TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF166534),
+                            backgroundColor: const Color(0xFFECFDF5),
+                            side: const BorderSide(color: Color(0xFFBBF7D0)),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _busy
+                              ? null
+                              : () async {
+                                  Navigator.pop(context);
+                                  await _setStatus(row, 'rejected');
+                                },
+                          icon: const Icon(Icons.block_outlined),
+                          label: const Text(
+                            "Reject",
+                            style: TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF9F1239),
+                            backgroundColor: const Color(0xFFFFF1F2),
+                            side: const BorderSide(color: Color(0xFFFDA4AF)),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 16),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ------------------------------------------------------------
+  // BUILD
   // ------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
@@ -284,417 +436,135 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
       backgroundColor: _bg,
       appBar: AppBar(
         backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
-        elevation: 0.6,
-        iconTheme: const IconThemeData(color: _text),
-        titleSpacing: 4.w,
-        title: const Text(
-          'Applicants',
-          style: TextStyle(
-            fontWeight: FontWeight.w900,
-            color: _text,
-            letterSpacing: -0.2,
-          ),
-        ),
+        foregroundColor: _text,
+        elevation: 0.7,
+        title: const Text("Applicants"),
         actions: [
           IconButton(
-            onPressed: _loadApplicants,
-            tooltip: "Refresh",
+            onPressed: _busy ? null : _load,
             icon: const Icon(Icons.refresh_rounded),
           ),
-          SizedBox(width: 2.w),
         ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? _errorState()
-              : _rows.isEmpty
-                  ? _emptyState()
-                  : RefreshIndicator(
-                      onRefresh: _loadApplicants,
-                      child: ListView.builder(
-                        padding: EdgeInsets.fromLTRB(4.w, 1.2.h, 4.w, 4.h),
-                        itemCount: _rows.length,
-                        itemBuilder: (context, index) {
-                          final row = _rows[index];
-                          final app = (row['job_applications'] ?? {})
-                              as Map<String, dynamic>;
-
-                          final name = (app['name'] ?? '')
-                              .toString()
-                              .trim()
-                              .ifEmpty("Candidate");
-
-                          final phone = (app['phone'] ?? '').toString().trim();
-                          final email = (app['email'] ?? '').toString().trim();
-
-                          final district =
-                              (app['district'] ?? '').toString().trim();
-                          final education =
-                              (app['education'] ?? '').toString().trim();
-
-                          final expectedSalary =
-                              (app['expected_salary'] ?? '').toString().trim();
-
-                          final experienceLevel =
-                              (app['experience_level'] ?? '').toString().trim();
-
-                          final experienceDetails =
-                              (app['experience_details'] ?? '')
-                                  .toString()
-                                  .trim();
-
-                          final skills = (app['skills'] ?? '').toString().trim();
-
-                          final resumeUrl =
-                              (app['resume_file_url'] ?? '').toString().trim();
-
-                          final photoUrl =
-                              (app['photo_file_url'] ?? '').toString().trim();
-
-                          return _applicantCard(
-                            listingRowId: row['id'].toString(),
-                            status: (row['application_status'] ?? 'applied')
-                                .toString(),
-                            appliedAt: row['applied_at'],
-                            name: name,
-                            phone: phone,
-                            email: email,
-                            district: district,
-                            education: education,
-                            expectedSalary: expectedSalary,
-                            experienceLevel: experienceLevel,
-                            experienceDetails: experienceDetails,
-                            skills: skills,
-                            resumeUrl: resumeUrl,
-                            photoUrl: photoUrl,
-                          );
-                        },
-                      ),
-                    ),
+          : Column(
+              children: [
+                _topFilters(),
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _load,
+                    child: _filtered.isEmpty
+                        ? ListView(
+                            padding: const EdgeInsets.all(16),
+                            children: [
+                              _emptyCard(),
+                            ],
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+                            itemCount: _filtered.length,
+                            itemBuilder: (_, i) {
+                              final row = _filtered[i];
+                              return _applicantTile(row);
+                            },
+                          ),
+                  ),
+                ),
+              ],
+            ),
     );
   }
 
   // ------------------------------------------------------------
-  // CARD
+  // UI: FILTERS
   // ------------------------------------------------------------
-  Widget _applicantCard({
-    required String listingRowId,
-    required String status,
-    required dynamic appliedAt,
-    required String name,
-    required String phone,
-    required String email,
-    required String district,
-    required String education,
-    required String expectedSalary,
-    required String experienceLevel,
-    required String experienceDetails,
-    required String skills,
-    required String resumeUrl,
-    required String photoUrl,
-  }) {
-    final statusUi = _statusUi(status);
-
+  Widget _topFilters() {
     return Container(
-      margin: EdgeInsets.only(bottom: 1.6.h),
-      padding: EdgeInsets.fromLTRB(4.w, 2.0.h, 4.w, 2.0.h),
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _line),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.025),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: _border)),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
-          Row(
-            children: [
-              _avatar(photoUrl, name),
-              SizedBox(width: 3.w),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 15.6,
-                        fontWeight: FontWeight.w900,
-                        color: _text,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _appliedAgo(appliedAt),
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: _muted,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              _statusChip(statusUi.label, statusUi.bg, statusUi.fg),
-            ],
-          ),
-
-          SizedBox(height: 1.6.h),
-
-          // Contact buttons row
-          Row(
-            children: [
-              Expanded(
-                child: _miniAction(
-                  icon: Icons.call_rounded,
-                  label: "Call",
-                  onTap: phone.trim().isEmpty ? null : () => _call(phone),
-                ),
-              ),
-              SizedBox(width: 2.5.w),
-              Expanded(
-                child: _miniAction(
-                  icon: Icons.mail_rounded,
-                  label: "Email",
-                  onTap: email.trim().isEmpty ? null : () => _email(email),
-                ),
-              ),
-              SizedBox(width: 2.5.w),
-              Expanded(
-                child: _miniAction(
-                  icon: Icons.picture_as_pdf_rounded,
-                  label: "Resume",
-                  onTap: resumeUrl.trim().isEmpty
-                      ? null
-                      : () => _openUrl(resumeUrl),
-                ),
-              ),
-            ],
-          ),
-
-          SizedBox(height: 1.6.h),
-          Divider(color: Colors.black.withOpacity(0.06), height: 1),
-          SizedBox(height: 1.6.h),
-
-          // Summary pills
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _pill(
-                icon: Icons.location_on_rounded,
-                text: district.isEmpty ? "District not set" : district,
-              ),
-              _pill(
-                icon: Icons.school_rounded,
-                text: education.isEmpty ? "Education not set" : education,
-              ),
-              _pill(
-                icon: Icons.work_rounded,
-                text: experienceLevel.isEmpty
-                    ? "Experience not set"
-                    : experienceLevel,
-              ),
-              _pill(
-                icon: Icons.currency_rupee_rounded,
-                text: expectedSalary.isEmpty
-                    ? "Salary not set"
-                    : expectedSalary,
-              ),
-            ],
-          ),
-
-          if (phone.trim().isNotEmpty || email.trim().isNotEmpty) ...[
-            SizedBox(height: 1.4.h),
-            _keyValueRow("Phone", phone.isEmpty ? "Not provided" : phone),
-            if (email.trim().isNotEmpty) _keyValueRow("Email", email.trim()),
-          ],
-
-          if (experienceDetails.trim().isNotEmpty) ...[
-            SizedBox(height: 1.6.h),
-            const Text(
-              "Experience Details",
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w900,
-                color: _text,
-              ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _border),
             ),
-            const SizedBox(height: 6),
-            Text(
-              experienceDetails,
-              style: const TextStyle(
-                color: Color(0xFF334155),
-                fontWeight: FontWeight.w700,
-                height: 1.35,
-              ),
-            ),
-          ],
-
-          if (skills.trim().isNotEmpty) ...[
-            SizedBox(height: 1.6.h),
-            const Text(
-              "Skills",
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w900,
-                color: _text,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              skills,
-              style: const TextStyle(
-                color: Color(0xFF334155),
-                fontWeight: FontWeight.w700,
-                height: 1.35,
-              ),
-            ),
-          ],
-
-          SizedBox(height: 2.h),
-
-          // Status actions
-          if (status == 'applied') ...[
-            Row(
+            child: Row(
               children: [
+                const Icon(Icons.search_rounded, color: _muted),
+                const SizedBox(width: 10),
                 Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () => _updateStatus(listingRowId, 'shortlisted'),
-                    icon: const Icon(Icons.check_circle_rounded, size: 18),
-                    label: const Text(
-                      "Shortlist",
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _primary,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
+                  child: TextField(
+                    controller: _search,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      hintText: "Search name, phone, email, skills...",
+                      border: InputBorder.none,
                     ),
                   ),
                 ),
-                SizedBox(width: 3.w),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _updateStatus(listingRowId, 'rejected'),
-                    icon: const Icon(Icons.cancel_rounded, size: 18),
-                    label: const Text(
-                      "Reject",
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF9F1239),
-                      side: const BorderSide(color: Color(0xFFFECACA)),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
+                if (_search.text.trim().isNotEmpty)
+                  InkWell(
+                    onTap: () {
+                      _search.clear();
+                      setState(() {});
+                    },
+                    child: const Icon(Icons.close_rounded, color: _muted),
                   ),
-                ),
               ],
             ),
-          ] else ...[
-            Row(
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 40,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
               children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _updateStatus(listingRowId, 'viewed'),
-                    icon: const Icon(Icons.remove_red_eye_rounded, size: 18),
-                    label: const Text(
-                      "Mark Viewed",
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: _text,
-                      side: const BorderSide(color: _line),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                  ),
-                ),
+                _filterChip("All", "all"),
+                _filterChip("Applied", "applied"),
+                _filterChip("Viewed", "viewed"),
+                _filterChip("Shortlisted", "shortlisted"),
+                _filterChip("Interview", "interview_scheduled"),
+                _filterChip("Selected", "selected"),
+                _filterChip("Rejected", "rejected"),
               ],
             ),
-          ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _avatar(String photoUrl, String name) {
-    if (photoUrl.trim().isEmpty) {
-      final letter = name.trim().isEmpty ? 'C' : name.trim()[0].toUpperCase();
-      final color = Colors.primaries[
-          Random(name.hashCode).nextInt(Colors.primaries.length)];
+  Widget _filterChip(String label, String key) {
+    final active = _filter == key;
 
-      return Container(
-        width: 52,
-        height: 52,
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.10),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: _line),
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          letter,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w900,
-            color: color,
-          ),
-        ),
-      );
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
-      child: CachedNetworkImage(
-        imageUrl: photoUrl,
-        width: 52,
-        height: 52,
-        fit: BoxFit.cover,
-        placeholder: (_, __) => Container(
-          width: 52,
-          height: 52,
-          color: const Color(0xFFF1F5F9),
-          child: const Center(
-            child: SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
+    return Padding(
+      padding: const EdgeInsets.only(right: 10),
+      child: InkWell(
+        onTap: () => setState(() => _filter = key),
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: active ? const Color(0xFFEFF6FF) : const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: active ? const Color(0xFFBFDBFE) : _border,
             ),
           ),
-        ),
-        errorWidget: (_, __, ___) => Container(
-          width: 52,
-          height: 52,
-          decoration: BoxDecoration(
-            color: const Color(0xFFFFF1F2),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: const Color(0xFFFECACA)),
-          ),
-          child: const Icon(
-            Icons.error_outline_rounded,
-            color: Color(0xFF9F1239),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              color: active ? _primary : _text,
+              fontSize: 12.5,
+            ),
           ),
         ),
       ),
@@ -702,86 +572,183 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
   }
 
   // ------------------------------------------------------------
-  // SMALL UI PIECES
+  // UI: LIST ITEM
   // ------------------------------------------------------------
-  Widget _miniAction({
-    required IconData icon,
-    required String label,
-    required VoidCallback? onTap,
-  }) {
-    final bool disabled = onTap == null;
+  Widget _applicantTile(Map<String, dynamic> row) {
+    final app = (row['job_applications'] ?? {}) as Map;
+
+    final name = (app['name'] ?? 'Candidate').toString();
+    final district = (app['district'] ?? '').toString();
+    final exp = (app['experience_level'] ?? '').toString();
+    final salary = (app['expected_salary'] ?? '').toString();
+
+    final status =
+        (row['application_status'] ?? 'applied').toString().toLowerCase();
+
+    final appliedAt = row['applied_at'];
 
     return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
+      onTap: () => _openApplicant(row),
+      borderRadius: BorderRadius.circular(20),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: disabled ? const Color(0xFFF1F5F9) : const Color(0xFFEFF6FF),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: disabled ? _line : const Color(0xFFDBEAFE),
-          ),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _border),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        child: Column(
           children: [
-            Icon(
-              icon,
-              size: 18,
-              color: disabled ? const Color(0xFF94A3B8) : _primary,
+            Row(
+              children: [
+                _avatar(name),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w900,
+                          color: _text,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        appliedAt == null
+                            ? "Recently applied"
+                            : "Applied ${_timeAgo(appliedAt)}",
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: _muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                _statusChip(status),
+              ],
             ),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                color: disabled ? const Color(0xFF94A3B8) : _primary,
-              ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _mini(Icons.location_on_outlined,
+                      district.isEmpty ? "Assam" : district),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _mini(Icons.timeline_outlined,
+                      exp.isEmpty ? "Experience: - " : exp),
+                ),
+              ],
             ),
+            const SizedBox(height: 10),
+            _mini(Icons.currency_rupee_rounded,
+                salary.isEmpty ? "Expected salary: -" : salary),
           ],
         ),
       ),
     );
   }
 
-  Widget _pill({required IconData icon, required String text}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _line),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: const Color(0xFF334155)),
-          const SizedBox(width: 8),
-          Text(
+  Widget _mini(IconData icon, String text) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: _muted),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
             text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
+              fontSize: 12.5,
               fontWeight: FontWeight.w800,
-              color: Color(0xFF334155),
+              color: _muted,
             ),
           ),
-        ],
+        ),
+      ],
+    );
+  }
+
+  Widget _statusChip(String status) {
+    final s = status.toLowerCase();
+
+    Color bg = const Color(0xFFEFF6FF);
+    Color fg = const Color(0xFF1D4ED8);
+    String label = 'Applied';
+
+    if (s == 'viewed') {
+      bg = const Color(0xFFF1F5F9);
+      fg = const Color(0xFF334155);
+      label = 'Viewed';
+    } else if (s == 'shortlisted') {
+      bg = const Color(0xFFECFDF5);
+      fg = const Color(0xFF166534);
+      label = 'Shortlisted';
+    } else if (s == 'interview_scheduled') {
+      bg = const Color(0xFFFFFBEB);
+      fg = const Color(0xFF7C2D12);
+      label = 'Interview';
+    } else if (s == 'interviewed') {
+      bg = const Color(0xFFFFFBEB);
+      fg = const Color(0xFF7C2D12);
+      label = 'Interviewed';
+    } else if (s == 'selected') {
+      bg = const Color(0xFFDCFCE7);
+      fg = const Color(0xFF14532D);
+      label = 'Selected';
+    } else if (s == 'rejected') {
+      bg = const Color(0xFFFFF1F2);
+      fg = const Color(0xFF9F1239);
+      label = 'Rejected';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: fg.withOpacity(0.12)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w900,
+          color: fg,
+        ),
       ),
     );
   }
 
-  Widget _keyValueRow(String k, String v) {
+  Widget _kv(String k, String v) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 74,
+            width: 120,
             child: Text(
               k,
               style: const TextStyle(
-                fontWeight: FontWeight.w800,
+                fontWeight: FontWeight.w900,
                 color: _muted,
               ),
             ),
@@ -792,6 +759,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
               style: const TextStyle(
                 fontWeight: FontWeight.w800,
                 color: _text,
+                height: 1.35,
               ),
             ),
           ),
@@ -800,53 +768,91 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
     );
   }
 
-  Widget _statusChip(String label, Color bg, Color fg) {
+  Widget _avatar(String name) {
+    final letter = name.isNotEmpty ? name[0].toUpperCase() : "C";
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      width: 46,
+      height: 46,
       decoration: BoxDecoration(
-        color: bg,
+        color: const Color(0xFFEFF6FF),
         borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFBFDBFE)),
       ),
+      alignment: Alignment.center,
       child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 12,
+        letter,
+        style: const TextStyle(
+          fontSize: 16,
           fontWeight: FontWeight.w900,
-          color: fg,
+          color: _primary,
         ),
       ),
     );
   }
 
-  // ------------------------------------------------------------
-  // HELPERS
-  // ------------------------------------------------------------
-  _StatusUI _statusUi(String status) {
-    final s = status.toLowerCase();
+  Widget _emptyCard() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _border),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _border),
+            ),
+            child: const Icon(Icons.people_outline, color: _text),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "No applicants found",
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: _text,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  "When candidates apply, they will appear here.",
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: _muted,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-    if (s == 'shortlisted') {
-      return _StatusUI(
-        label: "Shortlisted",
-        bg: const Color(0xFFECFDF5),
-        fg: const Color(0xFF14532D),
-      );
-    }
-    if (s == 'rejected') {
-      return _StatusUI(
-        label: "Rejected",
-        bg: const Color(0xFFFFF1F2),
-        fg: const Color(0xFF9F1239),
-      );
-    }
-    if (s == 'viewed') {
-      return _StatusUI(
-        label: "Viewed",
-        bg: const Color(0xFFF1F5F9),
-        fg: const Color(0xFF334155),
-      );
-    }
+  String _timeAgo(dynamic date) {
+    if (date == null) return 'recent';
 
-    return _StatusUI(
-      label: "Applied",
-      bg: const Color(0xFFEFF6FF),
-      fg: const
+    final d = DateTime.tryParse(date.toString());
+    if (d == null) return 'recent';
+
+    final diff = DateTime.now().difference(d);
+
+    if (diff.inMinutes < 2) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays == 1) return '1d ago';
+    return '${diff.inDays}d ago';
+  }
+}
