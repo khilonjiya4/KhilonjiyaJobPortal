@@ -12,14 +12,19 @@ import '../presentation/home_marketplace_feed/job_seeker_main_shell.dart';
 // PROFILE EDIT (PUSH PAGE)
 import '../presentation/home_marketplace_feed/profile_edit_page.dart';
 
-// SETTINGS + PAGES
+// SETTINGS
 import '../presentation/home_marketplace_feed/settings_page.dart';
-import '../presentation/home_marketplace_feed/notification_settings_page.dart';
-import '../presentation/home_marketplace_feed/privacy_settings_page.dart';
-import '../presentation/home_marketplace_feed/language_settings_page.dart';
-import '../presentation/home_marketplace_feed/about_page.dart';
-import '../presentation/home_marketplace_feed/policies_page.dart';
-import '../presentation/home_marketplace_feed/webview_page.dart';
+
+// LEGAL + ABOUT + SUPPORT
+import '../presentation/home_marketplace_feed/legal/privacy_policy_page.dart';
+import '../presentation/home_marketplace_feed/legal/terms_and_conditions_page.dart';
+import '../presentation/home_marketplace_feed/legal/refund_policy_page.dart';
+import '../presentation/home_marketplace_feed/about/about_app_page.dart';
+import '../presentation/home_marketplace_feed/support/contact_support_page.dart';
+
+// SETTINGS PAGES
+import '../presentation/home_marketplace_feed/settings/notifications_settings_page.dart';
+import '../presentation/home_marketplace_feed/settings/language_settings_page.dart';
 
 // EMPLOYER
 import '../presentation/company/dashboard/company_dashboard.dart';
@@ -55,16 +60,25 @@ class AppRoutes {
   static const String jobSeekerHome = '/job-seeker-home';
   static const String profileEdit = '/profile-edit';
 
-  // Settings
+  // ------------------------------------------------------------
+  // SETTINGS
+  // ------------------------------------------------------------
   static const String settings = '/settings';
-  static const String notificationSettings = '/settings-notifications';
-  static const String privacySettings = '/settings-privacy';
+  static const String notificationsSettings = '/settings-notifications';
   static const String languageSettings = '/settings-language';
-  static const String about = '/about';
-  static const String policies = '/policies';
 
-  // WebView
-  static const String webview = '/webview';
+  // ------------------------------------------------------------
+  // LEGAL
+  // ------------------------------------------------------------
+  static const String privacyPolicy = '/privacy-policy';
+  static const String termsAndConditions = '/terms-and-conditions';
+  static const String refundPolicy = '/refund-policy';
+
+  // ------------------------------------------------------------
+  // ABOUT + SUPPORT
+  // ------------------------------------------------------------
+  static const String aboutApp = '/about';
+  static const String contactSupport = '/contact-support';
 
   // ------------------------------------------------------------
   // EMPLOYER
@@ -80,34 +94,34 @@ class AppRoutes {
   // ROUTES MAP (NO-ARGUMENT ROUTES ONLY)
   // ------------------------------------------------------------
   static final Map<String, WidgetBuilder> routes = {
-    // Safety
     initial: (_) => const RoleSelectionScreen(),
-
-    // Role selection
     roleSelection: (_) => const RoleSelectionScreen(),
 
-    // Login
     jobSeekerLogin: (_) => const JobSeekerLoginScreen(),
     employerLogin: (_) => const EmployerLoginScreen(),
 
-    // Role based router (final truth)
     home: (_) => const HomeRouter(),
-
-    // Job seeker shell
     jobSeekerHome: (_) => const JobSeekerMainShell(),
 
-    // Profile edit
     profileEdit: (_) => const ProfileEditPage(),
 
-    // Settings
+    // settings root
     settings: (_) => const SettingsPage(),
-    notificationSettings: (_) => const NotificationSettingsPage(),
-    privacySettings: (_) => const PrivacySettingsPage(),
-    languageSettings: (_) => const LanguageSettingsPage(),
-    about: (_) => const AboutPage(),
-    policies: (_) => const PoliciesPage(),
 
-    // Employer
+    // settings children
+    notificationsSettings: (_) => const NotificationsSettingsPage(),
+    languageSettings: (_) => const LanguageSettingsPage(),
+
+    // legal
+    privacyPolicy: (_) => const PrivacyPolicyPage(),
+    termsAndConditions: (_) => const TermsAndConditionsPage(),
+    refundPolicy: (_) => const RefundPolicyPage(),
+
+    // about + support
+    aboutApp: (_) => const AboutAppPage(),
+    contactSupport: (_) => const ContactSupportPage(),
+
+    // employer
     companyDashboard: (_) => const CompanyDashboard(),
     employerJobs: (_) => const EmployerJobListScreen(),
     createJob: (_) => const CreateJobScreen(),
@@ -133,36 +147,6 @@ class AppRoutes {
 
         return MaterialPageRoute(
           builder: (_) => JobApplicantsScreen(jobId: jobId),
-        );
-
-      case webview:
-        final args = settings.arguments;
-
-        if (args == null || args is! Map) {
-          return MaterialPageRoute(
-            builder: (_) => const Scaffold(
-              body: Center(
-                child: Text("Invalid WebView arguments"),
-              ),
-            ),
-          );
-        }
-
-        final title = (args['title'] ?? '').toString().trim();
-        final url = (args['url'] ?? '').toString().trim();
-
-        if (title.isEmpty || url.isEmpty) {
-          return MaterialPageRoute(
-            builder: (_) => const Scaffold(
-              body: Center(
-                child: Text("Missing title or url"),
-              ),
-            ),
-          );
-        }
-
-        return MaterialPageRoute(
-          builder: (_) => WebViewPage(title: title, url: url),
         );
     }
 
