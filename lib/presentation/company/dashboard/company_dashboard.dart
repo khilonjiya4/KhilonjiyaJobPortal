@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../routes/app_routes.dart';
 import '../../../services/employer_job_service.dart';
@@ -12,6 +13,7 @@ class CompanyDashboard extends StatefulWidget {
 }
 
 class _CompanyDashboardState extends State<CompanyDashboard> {
+  final SupabaseClient _db = Supabase.instance.client;
   final EmployerJobService _service = EmployerJobService();
 
   bool _loading = true;
@@ -21,7 +23,25 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   List<Map<String, dynamic>> _recentApplicants = [];
   List<Map<String, dynamic>> _topJobs = [];
 
-  // Bottom nav (UI only now)
+  // REAL extras
+  Map<String, dynamic>? _company;
+  int _unreadNotifications = 0;
+
+  // interviews today
+  bool _loadingInterviews = true;
+  List<Map<String, dynamic>> _todayInterviews = [];
+
+  // performance last 7 days
+  bool _loadingPerformance = true;
+  List<Map<String, dynamic>> _perfDays = []; // [{date, views, applicants}]
+  int _views7d = 0;
+  int _apps7d = 0;
+
+  // action needed
+  int _pendingReviewCount = 0;
+  int _expiringJobsCount = 0;
+
+  // Bottom nav
   int _bottomIndex = 0;
 
   @override
@@ -30,6 +50,9 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     _loadDashboard();
   }
 
+  // ------------------------------------------------------------
+  // LOAD DASHBOARD
+  // ------------------------------------------------------------
   Future<void> _loadDashboard() async {
     if (!mounted) return;
     setState(() => _loading = true);
@@ -46,15 +69,324 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
       _stats = Map<String, dynamic>.from(results[1] as Map);
       _recentApplicants = List<Map<String, dynamic>>.from(results[2] as List);
       _topJobs = List<Map<String, dynamic>>.from(results[3] as List);
+
+      // Load real company from first job (since every job has company_id)
+      _company = await _fetchEmployerCompanyFromJobs(_jobs);
+
+      // Load unread notifications
+      _unreadNotifications = await _fetchUnreadNotificationsCount();
+
+      // Interviews + performance + action needed
+      await Future.wait([
+        _loadTodayInterviews(),
+        _loadPerformance7Days(),
+        _computeActionNeeded(),
+      ]);
     } catch (_) {
       _jobs = [];
       _stats = {};
       _recentApplicants = [];
       _topJobs = [];
+
+      _company = null;
+      _unreadNotifications = 0;
+
+      _todayInterviews = [];
+      _perfDays = [];
+      _views7d = 0;
+      _apps7d = 0;
+      _pendingReviewCount = 0;
+      _expiringJobsCount = 0;
     }
 
     if (!mounted) return;
     setState(() => _loading = false);
+  }
+
+  // ------------------------------------------------------------
+  // AUTH
+  // ------------------------------------------------------------
+  String _uid() {
+    final u = _db.auth.currentUser;
+    if (u == null) throw Exception("Session expired. Please login again.");
+    return u.id;
+  }
+
+  // ------------------------------------------------------------
+  // COMPANY (REAL)
+  // ------------------------------------------------------------
+  Future<Map<String, dynamic>?> _fetchEmployerCompanyFromJobs(
+    List<Map<String, dynamic>> jobs,
+  ) async {
+    if (jobs.isEmpty) return null;
+
+    final first = jobs.first;
+    final companyObj = first['companies'];
+
+    if (companyObj is Map) {
+      return Map<String, dynamic>.from(companyObj);
+    }
+
+    final companyId = (first['company_id'] ?? '').toString().trim();
+    if (companyId.isEmpty) return null;
+
+    final res = await _db
+        .from('companies')
+        .select('id,name,logo_url,is_verified,headquarters_state,headquarters_city')
+        .eq('id', companyId)
+        .maybeSingle();
+
+    if (res == null) return null;
+    return Map<String, dynamic>.from(res);
+  }
+
+  // ------------------------------------------------------------
+  // NOTIFICATIONS (REAL)
+  // ------------------------------------------------------------
+  Future<int> _fetchUnreadNotificationsCount() async {
+    final uid = _uid();
+
+    try {
+      // NOTE: Supabase count works only with PostgREST count option.
+      // This approach fetches small ids only, safe enough.
+      final res = await _db
+          .from('notifications')
+          .select('id')
+          .eq('user_id', uid)
+          .eq('is_read', false)
+          .limit(50);
+
+      return (res as List).length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  // ------------------------------------------------------------
+  // INTERVIEWS TODAY (REAL)
+  // ------------------------------------------------------------
+  Future<void> _loadTodayInterviews() async {
+    if (!mounted) return;
+    setState(() => _loadingInterviews = true);
+
+    try {
+      if (_company == null) {
+        _todayInterviews = [];
+        if (!mounted) return;
+        setState(() => _loadingInterviews = false);
+        return;
+      }
+
+      final companyId = (_company?['id'] ?? '').toString();
+      if (companyId.trim().isEmpty) {
+        _todayInterviews = [];
+        if (!mounted) return;
+        setState(() => _loadingInterviews = false);
+        return;
+      }
+
+      final now = DateTime.now();
+      final start = DateTime(now.year, now.month, now.day, 0, 0, 0);
+      final end = start.add(const Duration(days: 1));
+
+      final res = await _db
+          .from('interviews')
+          .select('''
+            id,
+            job_application_listing_id,
+            interview_type,
+            scheduled_at,
+            duration_minutes,
+            meeting_link,
+            location_address,
+            round_number,
+
+            job_applications_listings (
+              id,
+              listing_id,
+              application_status,
+
+              job_listings (
+                id,
+                job_title
+              ),
+
+              job_applications (
+                id,
+                name,
+                phone,
+                district,
+                education,
+                experience_level
+              )
+            )
+          ''')
+          .eq('company_id', companyId)
+          .gte('scheduled_at', start.toIso8601String())
+          .lt('scheduled_at', end.toIso8601String())
+          .order('scheduled_at', ascending: true)
+          .limit(12);
+
+      _todayInterviews = List<Map<String, dynamic>>.from(res);
+    } catch (_) {
+      _todayInterviews = [];
+    }
+
+    if (!mounted) return;
+    setState(() => _loadingInterviews = false);
+  }
+
+  // ------------------------------------------------------------
+  // PERFORMANCE LAST 7 DAYS (REAL)
+  // - views from job_views
+  // - applicants from job_applications_listings.applied_at
+  // ------------------------------------------------------------
+  Future<void> _loadPerformance7Days() async {
+    if (!mounted) return;
+    setState(() => _loadingPerformance = true);
+
+    try {
+      if (_jobs.isEmpty) {
+        _perfDays = [];
+        _views7d = 0;
+        _apps7d = 0;
+        if (!mounted) return;
+        setState(() => _loadingPerformance = false);
+        return;
+      }
+
+      final jobIds = _jobs.map((e) => (e['id'] ?? '').toString()).toList();
+      if (jobIds.isEmpty) {
+        _perfDays = [];
+        _views7d = 0;
+        _apps7d = 0;
+        if (!mounted) return;
+        setState(() => _loadingPerformance = false);
+        return;
+      }
+
+      final now = DateTime.now();
+      final start = DateTime(now.year, now.month, now.day)
+          .subtract(const Duration(days: 6)); // include today = 7 days
+
+      // views
+      final viewsRes = await _db
+          .from('job_views')
+          .select('job_id, viewed_at')
+          .inFilter('job_id', jobIds)
+          .gte('viewed_at', start.toIso8601String())
+          .limit(5000);
+
+      final viewsRows = List<Map<String, dynamic>>.from(viewsRes);
+
+      // applicants
+      final appsRes = await _db
+          .from('job_applications_listings')
+          .select('listing_id, applied_at')
+          .inFilter('listing_id', jobIds)
+          .gte('applied_at', start.toIso8601String())
+          .limit(5000);
+
+      final appsRows = List<Map<String, dynamic>>.from(appsRes);
+
+      // bucket by day
+      final Map<String, int> viewsByDay = {};
+      final Map<String, int> appsByDay = {};
+
+      String dayKey(DateTime d) =>
+          "${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
+
+      for (final r in viewsRows) {
+        final dt = DateTime.tryParse((r['viewed_at'] ?? '').toString());
+        if (dt == null) continue;
+        final k = dayKey(dt.toLocal());
+        viewsByDay[k] = (viewsByDay[k] ?? 0) + 1;
+      }
+
+      for (final r in appsRows) {
+        final dt = DateTime.tryParse((r['applied_at'] ?? '').toString());
+        if (dt == null) continue;
+        final k = dayKey(dt.toLocal());
+        appsByDay[k] = (appsByDay[k] ?? 0) + 1;
+      }
+
+      final List<Map<String, dynamic>> days = [];
+      int totalViews = 0;
+      int totalApps = 0;
+
+      for (int i = 0; i < 7; i++) {
+        final d = start.add(Duration(days: i));
+        final k = dayKey(d);
+
+        final v = viewsByDay[k] ?? 0;
+        final a = appsByDay[k] ?? 0;
+
+        totalViews += v;
+        totalApps += a;
+
+        days.add({
+          'date': d,
+          'views': v,
+          'apps': a,
+        });
+      }
+
+      _perfDays = days;
+      _views7d = totalViews;
+      _apps7d = totalApps;
+    } catch (_) {
+      _perfDays = [];
+      _views7d = 0;
+      _apps7d = 0;
+    }
+
+    if (!mounted) return;
+    setState(() => _loadingPerformance = false);
+  }
+
+  // ------------------------------------------------------------
+  // ACTION NEEDED (REAL)
+  // - pending review = applicants with status = applied
+  // - expiring jobs = expires_at within next 2 days and status=active
+  // ------------------------------------------------------------
+  Future<void> _computeActionNeeded() async {
+    try {
+      if (_jobs.isEmpty) {
+        _pendingReviewCount = 0;
+        _expiringJobsCount = 0;
+        return;
+      }
+
+      final jobIds = _jobs.map((e) => (e['id'] ?? '').toString()).toList();
+
+      // pending review
+      final pendingRes = await _db
+          .from('job_applications_listings')
+          .select('id')
+          .inFilter('listing_id', jobIds)
+          .eq('application_status', 'applied')
+          .limit(200);
+
+      _pendingReviewCount = (pendingRes as List).length;
+
+      // expiring jobs
+      final now = DateTime.now();
+      final soon = now.add(const Duration(days: 2));
+
+      final expiringRes = await _db
+          .from('job_listings')
+          .select('id')
+          .eq('employer_id', _uid())
+          .eq('status', 'active')
+          .lte('expires_at', soon.toIso8601String())
+          .gte('expires_at', now.toIso8601String())
+          .limit(200);
+
+      _expiringJobsCount = (expiringRes as List).length;
+    } catch (_) {
+      _pendingReviewCount = 0;
+      _expiringJobsCount = 0;
+    }
   }
 
   // ------------------------------------------------------------
@@ -87,7 +419,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   int get _applicants24h => _s('applicants_last_24h');
 
   // ------------------------------------------------------------
-  // FIGMA UI TOKENS
+  // DESIGN TOKENS (minimal, elegant)
   // ------------------------------------------------------------
   static const Color _bg = Color(0xFFF7F8FA);
   static const Color _card = Colors.white;
@@ -166,21 +498,33 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
 
                       const SizedBox(height: 18),
 
-                      _sectionHeader(title: "Today’s Interviews"),
+                      _sectionHeader(
+                        title: "Today’s Interviews",
+                        ctaText: _todayInterviews.isEmpty ? null : "View",
+                        onTap: _todayInterviews.isEmpty
+                            ? null
+                            : () {
+                                // For now: open Applicants screen (you can create Interviews page later)
+                                Navigator.pushNamed(
+                                  context,
+                                  AppRoutes.employerJobs,
+                                );
+                              },
+                      ),
                       const SizedBox(height: 10),
-                      _buildInterviewsUIOnly(),
+                      _buildTodayInterviews(),
 
                       const SizedBox(height: 18),
 
                       _sectionHeader(title: "Job Performance (Last 7 days)"),
                       const SizedBox(height: 10),
-                      _buildPerformanceUIOnly(),
+                      _buildPerformance(),
 
                       const SizedBox(height: 18),
 
                       _sectionHeader(title: "Action Needed"),
                       const SizedBox(height: 10),
-                      _buildActionNeededUIOnly(),
+                      _buildActionNeeded(),
                     ],
                   ),
                 ),
@@ -188,7 +532,6 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
           ],
         ),
       ),
-
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
           final res = await Navigator.pushNamed(context, AppRoutes.createJob);
@@ -241,35 +584,61 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
               ),
             ),
           ),
-          Stack(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: _border),
+
+          // Notifications
+          InkWell(
+            onTap: () {
+              // You can create a notifications page later.
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text("Notifications page coming next"),
                 ),
-                child: const Icon(
-                  Icons.notifications_none_outlined,
-                  size: 22,
-                  color: Color(0xFF334155),
-                ),
-              ),
-              Positioned(
-                right: 9,
-                top: 9,
-                child: Container(
-                  width: 9,
-                  height: 9,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFEF4444),
-                    shape: BoxShape.circle,
+              );
+            },
+            borderRadius: BorderRadius.circular(999),
+            child: Stack(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: _border),
+                  ),
+                  child: const Icon(
+                    Icons.notifications_none_outlined,
+                    size: 22,
+                    color: Color(0xFF334155),
                   ),
                 ),
-              ),
-            ],
+                if (_unreadNotifications > 0)
+                  Positioned(
+                    right: 7,
+                    top: 7,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFEF4444),
+                        borderRadius: BorderRadius.all(Radius.circular(999)),
+                      ),
+                      child: Text(
+                        _unreadNotifications > 99
+                            ? "99+"
+                            : _unreadNotifications.toString(),
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ],
       ),
@@ -277,24 +646,26 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // COMPANY PROFILE ROW
+  // COMPANY PROFILE ROW (REAL)
   // ------------------------------------------------------------
   Widget _buildCompanyProfileRow() {
+    final company = _company;
+
+    final name = (company?['name'] ?? 'Company').toString();
+    final verified = company?['is_verified'] == true;
+
+    final city = (company?['headquarters_city'] ?? '').toString().trim();
+    final state = (company?['headquarters_state'] ?? '').toString().trim();
+    final location = [city, state].where((e) => e.isNotEmpty).join(", ");
+
+    final logoUrl = (company?['logo_url'] ?? '').toString().trim();
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: _cardDeco(radius: _r20),
       child: Row(
         children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              color: const Color(0xFFEFF6FF),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: const Color(0xFFDBEAFE)),
-            ),
-            child: const Icon(Icons.apartment_rounded, color: _primary),
-          ),
+          _companyAvatar(name: name, logoUrl: logoUrl),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -302,12 +673,12 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
               children: [
                 Row(
                   children: [
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        "Khilonjiya Pvt Ltd",
+                        name.isEmpty ? "Company" : name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 15.5,
                           fontWeight: FontWeight.w800,
                           color: _text,
@@ -316,50 +687,54 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEFF6FF),
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: const Color(0xFFBFDBFE)),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.check_circle,
-                            size: 14,
-                            color: _primary,
-                          ),
-                          SizedBox(width: 6),
-                          Text(
-                            "Verified",
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w800,
+                    if (verified)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEFF6FF),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: const Color(0xFFBFDBFE)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.check_circle,
+                              size: 14,
                               color: _primary,
                             ),
-                          ),
-                        ],
+                            SizedBox(width: 6),
+                            Text(
+                              "Verified",
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w800,
+                                color: _primary,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
                   ],
                 ),
                 const SizedBox(height: 4),
-                const Row(
+                Row(
                   children: [
-                    Icon(Icons.location_on_outlined,
-                        size: 16, color: _muted),
-                    SizedBox(width: 6),
+                    const Icon(
+                      Icons.location_on_outlined,
+                      size: 16,
+                      color: _muted,
+                    ),
+                    const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        "Assam, India",
+                        location.isEmpty ? "Assam, India" : location,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 12.8,
                           fontWeight: FontWeight.w700,
                           color: _muted,
@@ -372,6 +747,53 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _companyAvatar({required String name, required String logoUrl}) {
+    final letter = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : "C";
+
+    if (logoUrl.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            color: const Color(0xFFF1F5F9),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: _border),
+          ),
+          child: Image.network(
+            logoUrl,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => _fallbackAvatar(letter),
+          ),
+        ),
+      );
+    }
+
+    return _fallbackAvatar(letter);
+  }
+
+  Widget _fallbackAvatar(String letter) {
+    return Container(
+      width: 52,
+      height: 52,
+      decoration: BoxDecoration(
+        color: const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFDBEAFE)),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        letter,
+        style: const TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w900,
+          color: _primary,
+        ),
       ),
     );
   }
@@ -418,40 +840,33 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // SECTION 1: QUICK STATS
+  // QUICK STATS (REAL)
   // ------------------------------------------------------------
   Widget _buildQuickStatsRow() {
-    final active = _activeJobs;
-    final newApplicants = _applicants24h;
-    final interviewsToday = 0;
-
     return SizedBox(
-      height: 122,
+      height: 132,
       child: ListView(
         scrollDirection: Axis.horizontal,
         children: [
           _quickStatCard(
             icon: Icons.work_outline,
-            value: active.toString(),
+            value: _activeJobs.toString(),
             label: "Active Jobs",
-            trendText: "+${_safeTrend(active)}%",
-            positive: true,
+            hint: "Total: $_totalJobs",
           ),
           const SizedBox(width: 12),
           _quickStatCard(
             icon: Icons.people_outline,
-            value: newApplicants.toString(),
-            label: "New Applicants",
-            trendText: "+${_safeTrend(newApplicants)}%",
-            positive: true,
+            value: _totalApplicants.toString(),
+            label: "Applicants",
+            hint: "Last 24h: $_applicants24h",
           ),
           const SizedBox(width: 12),
           _quickStatCard(
-            icon: Icons.calendar_today_outlined,
-            value: interviewsToday.toString(),
-            label: "Interviews Today",
-            trendText: "-0%",
-            positive: false,
+            icon: Icons.visibility_outlined,
+            value: _totalViews.toString(),
+            label: "Total Views",
+            hint: "Last 7d: $_views7d",
           ),
         ],
       ),
@@ -462,14 +877,10 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     required IconData icon,
     required String value,
     required String label,
-    required String trendText,
-    required bool positive,
+    required String hint,
   }) {
-    final trendColor =
-        positive ? const Color(0xFF16A34A) : const Color(0xFFEF4444);
-
     return Container(
-      width: 150,
+      width: 168,
       padding: const EdgeInsets.all(14),
       decoration: _cardDeco(radius: _r20),
       child: Column(
@@ -478,8 +889,8 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
           Row(
             children: [
               Container(
-                width: 38,
-                height: 38,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
                   color: const Color(0xFFEFF6FF),
                   borderRadius: BorderRadius.circular(14),
@@ -488,24 +899,8 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                 child: Icon(icon, color: _primary, size: 20),
               ),
               const Spacer(),
-              Row(
-                children: [
-                  Icon(
-                    positive ? Icons.trending_up : Icons.trending_down,
-                    size: 14,
-                    color: trendColor,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    trendText,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: trendColor,
-                    ),
-                  ),
-                ],
-              ),
+              const Icon(Icons.chevron_right_rounded,
+                  color: Color(0xFF94A3B8)),
             ],
           ),
           const SizedBox(height: 12),
@@ -523,8 +918,19 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
             label,
             style: const TextStyle(
               fontSize: 12.5,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w800,
               color: _muted,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            hint,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF94A3B8),
             ),
           ),
         ],
@@ -533,7 +939,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // SECTION 2: PRIMARY ACTIONS
+  // PRIMARY ACTIONS
   // ------------------------------------------------------------
   Widget _buildPrimaryActionsGrid() {
     return GridView.count(
@@ -567,30 +973,10 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
           },
         ),
         _actionTile(
-          icon: Icons.calendar_month_outlined,
-          label: "Schedule Interview",
+          icon: Icons.star_border_rounded,
+          label: "Top Jobs",
           onTap: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Interview scheduling coming next")),
-            );
-          },
-        ),
-        _actionTile(
-          icon: Icons.search,
-          label: "Search Candidates",
-          onTap: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Candidate search coming next")),
-            );
-          },
-        ),
-        _actionTile(
-          icon: Icons.flash_on_outlined,
-          label: "Boost Job",
-          onTap: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Boost job coming next")),
-            );
+            _showTopJobsBottomSheet();
           },
         ),
       ],
@@ -641,7 +1027,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // SECTION 3: RECENT APPLICANTS
+  // RECENT APPLICANTS (REAL)
   // ------------------------------------------------------------
   Widget _buildRecentApplicantsCard() {
     if (_recentApplicants.isEmpty) {
@@ -700,7 +1086,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     final status = (row['application_status'] ?? 'applied').toString();
     final appliedAt = row['applied_at'];
 
-    final name = (app['full_name'] ?? 'Candidate').toString();
+    final name = (app['name'] ?? 'Candidate').toString();
     final jobTitle = (listing['job_title'] ?? 'Job').toString();
 
     return InkWell(
@@ -717,24 +1103,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
         padding: const EdgeInsets.symmetric(vertical: 10),
         child: Row(
           children: [
-            Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF1F5F9),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: _border),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                name.isNotEmpty ? name[0].toUpperCase() : "C",
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w900,
-                  color: _text,
-                ),
-              ),
-            ),
+            _circleLetterAvatar(name),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -773,6 +1142,29 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     );
   }
 
+  Widget _circleLetterAvatar(String name) {
+    final letter = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : "C";
+
+    return Container(
+      width: 46,
+      height: 46,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: _border),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        letter,
+        style: const TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w900,
+          color: _text,
+        ),
+      ),
+    );
+  }
+
   Widget _applicationStatusChip(String status) {
     final s = status.toLowerCase();
 
@@ -788,10 +1180,14 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
       bg = const Color(0xFFECFDF5);
       fg = const Color(0xFF166534);
       label = 'Shortlisted';
-    } else if (s == 'interviewed') {
+    } else if (s == 'interview_scheduled') {
       bg = const Color(0xFFFFFBEB);
       fg = const Color(0xFF7C2D12);
       label = 'Interview';
+    } else if (s == 'interviewed') {
+      bg = const Color(0xFFFFFBEB);
+      fg = const Color(0xFF7C2D12);
+      label = 'Interviewed';
     } else if (s == 'selected') {
       bg = const Color(0xFFDCFCE7);
       fg = const Color(0xFF14532D);
@@ -821,7 +1217,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // SECTION 4: ACTIVE JOB POSTS
+  // ACTIVE JOB POSTS (REAL)
   // ------------------------------------------------------------
   Widget _buildActiveJobsList() {
     if (_jobs.isEmpty) {
@@ -854,6 +1250,10 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     final postedAt = job['created_at'];
 
     final applicants = _toInt(job['applications_count']);
+    final views = _toInt(job['views_count']);
+
+    final salaryMin = job['salary_min'];
+    final salaryMax = job['salary_max'];
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -882,6 +1282,8 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
             ],
           ),
           const SizedBox(height: 8),
+
+          // location + type
           Row(
             children: [
               const Icon(Icons.location_on_outlined, size: 16, color: _muted),
@@ -916,7 +1318,33 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
               ),
             ],
           ),
+
+          const SizedBox(height: 8),
+
+          // salary
+          Row(
+            children: [
+              const Icon(Icons.currency_rupee_rounded,
+                  size: 16, color: _muted),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  _salaryText(salaryMin, salaryMax),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF334155),
+                  ),
+                ),
+              ),
+            ],
+          ),
+
           const SizedBox(height: 10),
+
+          // posted + applicants + views
           Row(
             children: [
               const Icon(Icons.access_time, size: 16, color: _muted),
@@ -947,35 +1375,31 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                   color: _muted,
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text("Edit job coming next")),
-                    );
-                  },
-                  icon: const Icon(Icons.edit_outlined, size: 18),
-                  label: const Text(
-                    "Edit",
-                    style: TextStyle(fontWeight: FontWeight.w900),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: _text,
-                    backgroundColor: const Color(0xFFF8FAFC),
-                    side: const BorderSide(color: _border),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
+              const Text(
+                " • ",
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: _muted,
                 ),
               ),
-              const SizedBox(width: 10),
+              const Icon(Icons.visibility_outlined, size: 16, color: _muted),
+              const SizedBox(width: 6),
+              Text(
+                "$views views",
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: _muted,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          Row(
+            children: [
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: () async {
@@ -995,6 +1419,28 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                     foregroundColor: _primary,
                     backgroundColor: const Color(0xFFEFF6FF),
                     side: const BorderSide(color: Color(0xFFBFDBFE)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.pushNamed(context, AppRoutes.employerJobs);
+                  },
+                  icon: const Icon(Icons.work_outline, size: 18),
+                  label: const Text(
+                    "Manage",
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _text,
+                    backgroundColor: const Color(0xFFF8FAFC),
+                    side: const BorderSide(color: _border),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
@@ -1053,38 +1499,33 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // SECTION 5: INTERVIEW SCHEDULE (UI ONLY)
+  // TODAY'S INTERVIEWS (REAL)
   // ------------------------------------------------------------
-  Widget _buildInterviewsUIOnly() {
-    final interviews = [
-      {
-        "time": "10:30 AM",
-        "name": "Rahul Sharma",
-        "role": "Frontend Developer",
-        "mode": "Online",
-      },
-      {
-        "time": "2:00 PM",
-        "name": "Priya Devi",
-        "role": "UI/UX Designer",
-        "mode": "In-person",
-      },
-      {
-        "time": "4:30 PM",
-        "name": "Amit Kumar",
-        "role": "Backend Developer",
-        "mode": "Online",
-      },
-    ];
+  Widget _buildTodayInterviews() {
+    if (_loadingInterviews) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: _cardDeco(radius: _r20),
+        child: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_todayInterviews.isEmpty) {
+      return _softEmptyCard(
+        icon: Icons.calendar_month_outlined,
+        title: "No interviews today",
+        subtitle: "Scheduled interviews will appear here automatically.",
+      );
+    }
 
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: _cardDeco(radius: _r20),
       child: Column(
         children: [
-          for (int i = 0; i < interviews.length; i++) ...[
-            _interviewTile(interviews[i]),
-            if (i != interviews.length - 1)
+          for (int i = 0; i < _todayInterviews.length; i++) ...[
+            _interviewTile(_todayInterviews[i]),
+            if (i != _todayInterviews.length - 1)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 10),
                 child: Divider(height: 1, color: Color(0xFFE6E8EC)),
@@ -1095,9 +1536,29 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     );
   }
 
-  Widget _interviewTile(Map<String, dynamic> i) {
-    final mode = (i['mode'] ?? '').toString();
-    final isOnline = mode.toLowerCase().contains('online');
+  Widget _interviewTile(Map<String, dynamic> row) {
+    final scheduledAt = DateTime.tryParse((row['scheduled_at'] ?? '').toString())
+        ?.toLocal();
+
+    final type = (row['interview_type'] ?? 'video').toString().toLowerCase();
+    final isOnline = type == 'video';
+
+    final duration = _toInt(row['duration_minutes']);
+    final meetingLink = (row['meeting_link'] ?? '').toString().trim();
+    final location = (row['location_address'] ?? '').toString().trim();
+
+    final listingObj = (row['job_applications_listings'] ?? {}) as Map;
+    final jobObj = (listingObj['job_listings'] ?? {}) as Map;
+    final appObj = (listingObj['job_applications'] ?? {}) as Map;
+
+    final candidate = (appObj['name'] ?? 'Candidate').toString();
+    final jobTitle = (jobObj['job_title'] ?? 'Job').toString();
+
+    final timeText = scheduledAt == null
+        ? "Scheduled"
+        : _formatTime(scheduledAt);
+
+    final modeText = isOnline ? "Online" : "In-person";
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1120,41 +1581,38 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
                 children: [
-                  Text(
-                    (i['time'] ?? '').toString(),
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w900,
-                      color: _primary,
-                    ),
+                  _pill(
+                    icon: Icons.schedule_rounded,
+                    text: timeText,
+                    bg: const Color(0xFFEFF6FF),
+                    fg: _primary,
                   ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF1F5F9),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: _border),
-                    ),
-                    child: Text(
-                      mode,
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w800,
-                        color: _muted,
-                      ),
-                    ),
+                  _pill(
+                    icon: isOnline
+                        ? Icons.wifi_tethering_rounded
+                        : Icons.place_outlined,
+                    text: modeText,
+                    bg: const Color(0xFFF1F5F9),
+                    fg: const Color(0xFF334155),
                   ),
+                  if (duration > 0)
+                    _pill(
+                      icon: Icons.timelapse_rounded,
+                      text: "${duration}m",
+                      bg: const Color(0xFFF8FAFC),
+                      fg: const Color(0xFF475569),
+                    ),
                 ],
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 8),
               Text(
-                (i['name'] ?? '').toString(),
+                candidate,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontSize: 14.5,
                   fontWeight: FontWeight.w900,
@@ -1163,36 +1621,60 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
               ),
               const SizedBox(height: 2),
               Text(
-                (i['role'] ?? '').toString(),
+                jobTitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.w700,
                   color: _muted,
                 ),
               ),
-              const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: ElevatedButton(
-                  onPressed: () {},
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _primary,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 8,
+              if (isOnline && meetingLink.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            "Open meeting link (url_launcher) coming next",
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.link_rounded, size: 18),
+                    label: const Text(
+                      "Open Link",
+                      style: TextStyle(fontWeight: FontWeight.w900),
                     ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _primary,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
-                  ),
-                  child: Text(
-                    isOnline ? "Join" : "Call",
-                    style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                 ),
-              ),
+              ],
+              if (!isOnline && location.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  location,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF334155),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -1200,56 +1682,187 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     );
   }
 
+  Widget _pill({
+    required IconData icon,
+    required String text,
+    required Color bg,
+    required Color fg,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: fg.withOpacity(0.10)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: fg),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w900,
+              color: fg,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ------------------------------------------------------------
-  // SECTION 6: PERFORMANCE SUMMARY (UI ONLY)
+  // PERFORMANCE (REAL)
   // ------------------------------------------------------------
-  Widget _buildPerformanceUIOnly() {
+  Widget _buildPerformance() {
+    if (_loadingPerformance) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: _cardDeco(radius: _r20),
+        child: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_perfDays.isEmpty) {
+      return _softEmptyCard(
+        icon: Icons.insights_outlined,
+        title: "No performance data yet",
+        subtitle: "Views and applications will show here automatically.",
+      );
+    }
+
+    final maxV = _perfDays
+        .map((e) => _toInt(e['views']))
+        .fold<int>(1, (a, b) => a > b ? a : b);
+
+    final maxA = _perfDays
+        .map((e) => _toInt(e['apps']))
+        .fold<int>(1, (a, b) => a > b ? a : b);
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: _cardDeco(radius: _r20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            height: 180,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: _border),
-            ),
-            alignment: Alignment.center,
-            child: const Text(
-              "Chart UI placeholder\n(fl_chart integration later)",
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w800,
-                color: _muted,
-                height: 1.35,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
+          // summary row
           Row(
             children: [
               Expanded(
                 child: _metricMini(
-                  label: "Views",
-                  value: _totalViews.toString(),
+                  label: "Views (7d)",
+                  value: _views7d.toString(),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: _metricMini(
-                  label: "Applications",
-                  value: _totalApplicants.toString(),
+                  label: "Applications (7d)",
+                  value: _apps7d.toString(),
                 ),
               ),
             ],
           ),
+          const SizedBox(height: 12),
+
+          // minimal bars (no external chart lib)
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _border),
+            ),
+            child: Column(
+              children: _perfDays.map((d) {
+                final date = d['date'] as DateTime;
+                final v = _toInt(d['views']);
+                final a = _toInt(d['apps']);
+
+                final vw = maxV == 0 ? 0.0 : (v / maxV);
+                final aw = maxA == 0 ? 0.0 : (a / maxA);
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 44,
+                        child: Text(
+                          _dayShort(date),
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            _miniBar(
+                              label: "V $v",
+                              fill: vw,
+                              fg: _primary,
+                            ),
+                            const SizedBox(height: 6),
+                            _miniBar(
+                              label: "A $a",
+                              fill: aw,
+                              fg: const Color(0xFF16A34A),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _miniBar({
+    required String label,
+    required double fill,
+    required Color fg,
+  }) {
+    final f = fill.clamp(0.0, 1.0);
+
+    return Row(
+      children: [
+        SizedBox(
+          width: 42,
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              color: Color(0xFF334155),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: Container(
+              height: 8,
+              color: const Color(0xFFE2E8F0),
+              alignment: Alignment.centerLeft,
+              child: FractionallySizedBox(
+                widthFactor: f,
+                child: Container(color: fg),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1287,35 +1900,65 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // SECTION 7: ACTION NEEDED (UI ONLY)
+  // ACTION NEEDED (REAL)
   // ------------------------------------------------------------
-  Widget _buildActionNeededUIOnly() {
-    return Column(
-      children: [
+  Widget _buildActionNeeded() {
+    if (_jobs.isEmpty) {
+      return _softEmptyCard(
+        icon: Icons.check_circle_outline,
+        title: "Nothing to review",
+        subtitle: "Once you post jobs and get applicants, tasks appear here.",
+      );
+    }
+
+    final items = <Widget>[];
+
+    if (_pendingReviewCount > 0) {
+      items.add(
         _actionNeededCard(
           icon: Icons.people_outline,
-          title: "3 applicants waiting for review",
+          title: "$_pendingReviewCount applicants waiting for review",
           buttonText: "Review now",
           onTap: () {
             Navigator.pushNamed(context, AppRoutes.employerJobs);
           },
         ),
-        const SizedBox(height: 12),
+      );
+    }
+
+    if (_expiringJobsCount > 0) {
+      items.add(
         _actionNeededCard(
           icon: Icons.warning_amber_outlined,
-          title: "1 job post expiring tomorrow",
+          title: "$_expiringJobsCount job posts expiring soon",
           buttonText: "Manage jobs",
           onTap: () {
             Navigator.pushNamed(context, AppRoutes.employerJobs);
           },
         ),
-        const SizedBox(height: 12),
+      );
+    }
+
+    // Always show a small status card (clean UX)
+    if (items.isEmpty) {
+      items.add(
         _actionNeededCard(
           icon: Icons.check_circle_outline,
-          title: "Complete company profile to boost trust",
-          buttonText: "Complete",
-          onTap: () {},
+          title: "All caught up",
+          buttonText: "View jobs",
+          onTap: () {
+            Navigator.pushNamed(context, AppRoutes.employerJobs);
+          },
         ),
+      );
+    }
+
+    return Column(
+      children: [
+        for (int i = 0; i < items.length; i++) ...[
+          items[i],
+          if (i != items.length - 1) const SizedBox(height: 12),
+        ],
       ],
     );
   }
@@ -1382,9 +2025,113 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
+  // TOP JOBS (REAL) - bottom sheet
+  // ------------------------------------------------------------
+  void _showTopJobsBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (_) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE2E8F0),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    "Top Performing Jobs",
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                      color: _text,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (_topJobs.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Text(
+                      "No top jobs yet.",
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: _muted,
+                      ),
+                    ),
+                  )
+                else
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: _topJobs.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (_, i) {
+                        final j = _topJobs[i];
+                        final title = (j['job_title'] ?? 'Job').toString();
+                        final applicants = _toInt(j['applications_count']);
+                        final views = _toInt(j['views_count']);
+                        final status = (j['status'] ?? 'active').toString();
+
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              color: _text,
+                            ),
+                          ),
+                          subtitle: Text(
+                            "$applicants applicants • $views views • ${status.toUpperCase()}",
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: _muted,
+                            ),
+                          ),
+                          trailing: const Icon(Icons.chevron_right_rounded),
+                          onTap: () {
+                            Navigator.pop(context);
+                            Navigator.pushNamed(
+                              context,
+                              AppRoutes.employerJobs,
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ------------------------------------------------------------
   // DRAWER
   // ------------------------------------------------------------
   Widget _newEmployerDrawer() {
+    final companyName = (_company?['name'] ?? 'Company').toString();
+
     return Drawer(
       backgroundColor: Colors.white,
       child: SafeArea(
@@ -1399,32 +2146,28 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
               ),
               child: Row(
                 children: [
-                  Container(
-                    width: 52,
-                    height: 52,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEFF6FF),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: const Color(0xFFDBEAFE)),
-                    ),
-                    child: const Icon(Icons.apartment_rounded, color: _primary),
+                  _companyAvatar(
+                    name: companyName,
+                    logoUrl: (_company?['logo_url'] ?? '').toString(),
                   ),
                   const SizedBox(width: 12),
-                  const Expanded(
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          "Khilonjiya Pvt Ltd",
-                          style: TextStyle(
+                          companyName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
                             fontSize: 15.5,
                             fontWeight: FontWeight.w900,
                             color: _text,
                             letterSpacing: -0.2,
                           ),
                         ),
-                        SizedBox(height: 3),
-                        Text(
+                        const SizedBox(height: 3),
+                        const Text(
                           "Employer Account",
                           style: TextStyle(
                             fontSize: 12.5,
@@ -1560,7 +2303,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // BOTTOM NAV
+  // BOTTOM NAV (REAL ROUTES)
   // ------------------------------------------------------------
   Widget _buildBottomNav() {
     return Container(
@@ -1573,11 +2316,18 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
         onTap: (i) {
           setState(() => _bottomIndex = i);
 
-          // UI only for now (routes later)
           if (i == 1) {
             Navigator.pushNamed(context, AppRoutes.employerJobs);
           } else if (i == 2) {
             Navigator.pushNamed(context, AppRoutes.employerJobs);
+          } else if (i == 3) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("Messages coming next")),
+            );
+          } else if (i == 4) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("Profile coming next")),
+            );
           }
         },
         type: BottomNavigationBarType.fixed,
@@ -1689,10 +2439,36 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     );
   }
 
-  int _safeTrend(int value) {
-    if (value <= 0) return 0;
-    if (value > 99) return 99;
-    return value;
+  String _salaryText(dynamic min, dynamic max) {
+    int? toInt(dynamic v) {
+      if (v == null) return null;
+      if (v is int) return v;
+      return int.tryParse(v.toString());
+    }
+
+    final mn = toInt(min);
+    final mx = toInt(max);
+
+    // Your requirement: show as "5000 - 10000 / month"
+    if (mn != null && mx != null) return "$mn - $mx / month";
+    if (mn != null) return "$mn / month";
+    return "Salary not disclosed";
+  }
+
+  String _formatTime(DateTime d) {
+    int h = d.hour;
+    final m = d.minute.toString().padLeft(2, '0');
+
+    final ampm = h >= 12 ? "PM" : "AM";
+    h = h % 12;
+    if (h == 0) h = 12;
+
+    return "$h:$m $ampm";
+  }
+
+  String _dayShort(DateTime d) {
+    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    return days[(d.weekday - 1).clamp(0, 6)];
   }
 
   String _timeAgo(dynamic date) {
