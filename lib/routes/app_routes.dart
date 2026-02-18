@@ -199,4 +199,55 @@ class AppRoutes {
     );
   }
 
-  //
+  // ------------------------------------------------------------
+  // HELPERS
+  // ------------------------------------------------------------
+  static Future<void> pushAndClearStack(
+    BuildContext context,
+    String routeName,
+  ) async {
+    await Navigator.of(context).pushNamedAndRemoveUntil(
+      routeName,
+      (_) => false,
+    );
+  }
+
+  static Future<void> pushNamed(
+    BuildContext context,
+    String routeName, {
+    Object? arguments,
+  }) async {
+    await Navigator.of(context).pushNamed(
+      routeName,
+      arguments: arguments,
+    );
+  }
+
+  static Future<void> pushReplacementNamed(
+    BuildContext context,
+    String routeName, {
+    Object? arguments,
+  }) async {
+    await Navigator.of(context).pushReplacementNamed(
+      routeName,
+      arguments: arguments,
+    );
+  }
+
+  static void pop(BuildContext context, [dynamic result]) {
+    Navigator.of(context).pop(result);
+  }
+
+  static bool canPop(BuildContext context) {
+    return Navigator.of(context).canPop();
+  }
+
+  static T? getArguments<T>(BuildContext context) {
+    final args = ModalRoute.of(context)?.settings.arguments;
+    return args is T ? args : null;
+  }
+
+  static String? getCurrentRouteName(BuildContext context) {
+    return ModalRoute.of(context)?.settings.name;
+  }
+}
