@@ -7,26 +7,27 @@ class AppLinks {
   static const String companyName = 'Khilonjiya India Private Limited';
 
   // ------------------------------------------------------------
-  // WEBSITE (put your real domain later)
-  // Example: https://khilonjiya.in
+  // WEBSITE (future)
   // ------------------------------------------------------------
-  static const String websiteUrl = '';
+  static const String websiteBase = ''; // e.g. https://khilonjiya.in
+
+  // ------------------------------------------------------------
+  // LEGAL (future URLs)
+  // ------------------------------------------------------------
+  static const String privacyPolicyUrl = '';
+  static const String termsUrl = '';
+  static const String refundsUrl = '';
 
   // ------------------------------------------------------------
   // SUPPORT
   // ------------------------------------------------------------
-  static const String supportEmail = ''; // example: support@khilonjiya.in
+  static const String supportEmail = 'support@khilonjiya.in';
+  static const String supportPhone = ''; // optional later
+  static const String supportWhatsapp = ''; // optional later
+  static const String contactSupportUrl = ''; // optional later (website page)
 
   // ------------------------------------------------------------
-  // LEGAL URLS (put your real website urls later)
+  // PLAY STORE
   // ------------------------------------------------------------
-  static const String privacyPolicyUrl = '';
-  static const String termsUrl = '';
-  static const String refundPolicyUrl = '';
-  static const String contactSupportUrl = '';
-
-  // ------------------------------------------------------------
-  // PLAY STORE (replace later)
-  // ------------------------------------------------------------
-  static const String playStoreUrl = '';
+  static const String playStoreUrl = ''; // add later
 }
