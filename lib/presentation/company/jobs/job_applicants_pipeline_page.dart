@@ -1,5 +1,6 @@
 // lib/presentation/company/jobs/job_applicants_pipeline_page.dart
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/ui/khilonjiya_ui.dart';
 import '../../../services/employer_applicants_service.dart';
@@ -31,6 +32,8 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
   // stageId -> listing rows
   final Map<String, List<Map<String, dynamic>>> _stageBuckets = {};
 
+  String _jobTitle = '';
+
   // UI
   static const Color _bg = Color(0xFFF7F8FA);
   static const Color _border = Color(0xFFE6E8EC);
@@ -46,6 +49,7 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
 
   void _toast(String msg) {
     if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg)),
     );
@@ -59,15 +63,16 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
     setState(() => _loading = true);
 
     try {
-      // ✅ SECURITY: real function you already have
-      await _service.ensureJobOwnerAndGetJob(widget.jobId);
+      // SECURITY: ensure current employer owns this job
+      final job = await _service.ensureJobOwnerAndGetJob(widget.jobId);
+      _jobTitle = (job['job_title'] ?? '').toString();
 
       // stages
       _stages = await _service.getCompanyPipelineStages(
         companyId: widget.companyId,
       );
 
-      // fallback stage if company has none
+      // fallback if company has none
       if (_stages.isEmpty) {
         _stages = [
           {
@@ -106,7 +111,7 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
 
     if (_stages.isEmpty) return;
 
-    // determine default stage
+    // default stage
     final def = _stages.firstWhere(
       (x) => x['is_default'] == true,
       orElse: () => _stages.first,
@@ -120,9 +125,9 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
 
       String stageId = extracted.trim().isEmpty ? defaultStageId : extracted;
 
-      // if stage id not in current company stages, fallback
+      // if stage id not in current company stages, fallback to default
       if (_stageBuckets[stageId] == null) {
-        stageId = (_stages.first['id'] ?? '').toString();
+        stageId = defaultStageId;
       }
 
       _stageBuckets[stageId]!.add(r);
@@ -144,17 +149,17 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
     setState(() => _moving = true);
 
     try {
-      // ✅ REAL: service updates notes safely and logs stage history
       await _service.moveApplicantToStage(
         listingRowId: listingRowId,
         jobId: widget.jobId,
         toStageId: toStageId,
       );
 
-      // Refresh local row notes WITHOUT duplicating tags
+      // Update local notes safely
       final existingNotes = (row['employer_notes'] ?? '').toString();
       final cleaned =
           existingNotes.replaceAll(RegExp(r'\[pipeline_stage_id:.*?\]\s*'), '');
+
       row['employer_notes'] = '[pipeline_stage_id:$toStageId]\n$cleaned'.trim();
 
       _rebuildBuckets();
@@ -165,6 +170,27 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
 
     if (!mounted) return;
     setState(() => _moving = false);
+  }
+
+  // ------------------------------------------------------------
+  // RESUME OPEN (REAL)
+  // ------------------------------------------------------------
+  Future<void> _openResume(Map<String, dynamic> row) async {
+    final app = (row['job_applications'] ?? {}) as Map;
+    final url = (app['resume_file_url'] ?? '').toString().trim();
+
+    if (url.isEmpty) {
+      _toast("Resume not uploaded");
+      return;
+    }
+
+    try {
+      final uri = Uri.parse(url);
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok) _toast("Cannot open resume");
+    } catch (e) {
+      _toast("Cannot open resume: ${e.toString()}");
+    }
   }
 
   // ------------------------------------------------------------
@@ -228,7 +254,6 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
                     ],
                   ),
                   const SizedBox(height: 14),
-
                   _kv("Phone", phone.isEmpty ? "Not provided" : phone),
                   _kv("Email", email.isEmpty ? "Not provided" : email),
                   _kv("District", district.isEmpty ? "Not provided" : district),
@@ -236,9 +261,7 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
                   _kv("Experience", exp.isEmpty ? "Not provided" : exp),
                   _kv("Expected Salary",
                       salary.isEmpty ? "Not provided" : salary),
-
                   const SizedBox(height: 12),
-
                   Text(
                     "Skills",
                     style: KhilonjiyaUI.hTitle.copyWith(fontSize: 14),
@@ -251,17 +274,16 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
                       height: 1.45,
                     ),
                   ),
-
                   const SizedBox(height: 14),
-
                   Row(
                     children: [
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: resume.isEmpty
+                          onPressed: resume.isEmpty || _moving
                               ? null
-                              : () {
-                                  _toast("Resume open will be added next");
+                              : () async {
+                                  Navigator.pop(context);
+                                  await _openResume(row);
                                 },
                           icon: const Icon(Icons.description_outlined, size: 18),
                           label: const Text(
@@ -282,7 +304,9 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: () => _editNotes(row, notes),
+                          onPressed: _moving
+                              ? null
+                              : () => _editNotes(row, notes),
                           icon: const Icon(Icons.edit_note_rounded, size: 20),
                           label: const Text(
                             "Notes",
@@ -301,15 +325,12 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
                       ),
                     ],
                   ),
-
                   const SizedBox(height: 14),
-
                   Text(
                     "Move to Stage",
                     style: KhilonjiyaUI.hTitle.copyWith(fontSize: 14),
                   ),
                   const SizedBox(height: 10),
-
                   Wrap(
                     spacing: 10,
                     runSpacing: 10,
@@ -347,7 +368,6 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
                       );
                     }).toList(),
                   ),
-
                   const SizedBox(height: 16),
                 ],
               ),
@@ -433,6 +453,22 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(34),
+          child: Container(
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: Text(
+              _jobTitle.isEmpty ? "Pipeline Board" : _jobTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontWeight: FontWeight.w800,
+                color: _muted,
+              ),
+            ),
+          ),
+        ),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -480,7 +516,6 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
             ),
           ),
         if (_moving) const SizedBox(height: 12),
-
         SizedBox(
           height: MediaQuery.of(context).size.height - 180,
           child: ListView.separated(
@@ -559,11 +594,9 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
               ),
             ],
           ),
-
           const SizedBox(height: 10),
           const Divider(height: 1, color: _border),
           const SizedBox(height: 10),
-
           if (rows.isEmpty)
             Expanded(
               child: Center(
@@ -645,12 +678,9 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
               ],
             ),
             const SizedBox(height: 10),
-
             if (district.isNotEmpty)
               _miniRow(Icons.location_on_outlined, district),
-
             if (exp.isNotEmpty) _miniRow(Icons.timeline_outlined, exp),
-
             if (salary.isNotEmpty)
               _miniRow(Icons.currency_rupee_rounded, salary),
           ],
