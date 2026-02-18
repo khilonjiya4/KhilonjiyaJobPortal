@@ -210,6 +210,7 @@ class JobSeekerHomeService {
     return path;
   }
 
+
 Future<List<Map<String, dynamic>>> fetchPremiumJobs({
   int offset = 0,
   int limit = 20,
@@ -270,6 +271,278 @@ Future<List<Map<String, dynamic>>> fetchCompanyJobs({
     return path;
   }
 
+
+
+
+// ============================================================
+  // JOB APPLICATIONS (REAL APPLY)
+  // ============================================================
+
+  /// Get or create the user's master application row in `job_applications`.
+  /// Returns application_id (uuid string).
+  Future<String> _getOrCreateMyMasterApplication({
+    String? name,
+    String? phone,
+    String? email,
+    String? district,
+    String? address,
+    String? education,
+    String? experienceLevel,
+    String? experienceDetails,
+    String? skills,
+    String? expectedSalary,
+    String? availability,
+    String? additionalInfo,
+    String? resumeFileName,
+    String? resumeFileUrl,
+    String? photoFileName,
+    String? photoFileUrl,
+    List<String>? jobCategories,
+  }) async {
+    _ensureAuthenticatedSync();
+    final userId = _userId();
+
+    // 1) check existing
+    final existing = await _db
+        .from('job_applications')
+        .select('id')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+    // 2) if exists -> update (light update)
+    if (existing != null) {
+      final appId = existing['id'].toString();
+
+      final updatePayload = <String, dynamic>{
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
+      void put(String key, dynamic value) {
+        if (value == null) return;
+        if (value is String && value.trim().isEmpty) return;
+        updatePayload[key] = value;
+      }
+
+      put('name', name);
+      put('phone', phone);
+      put('email', email);
+      put('district', district);
+      put('address', address);
+      put('education', education);
+      put('experience_level', experienceLevel);
+      put('experience_details', experienceDetails);
+      put('skills', skills);
+      put('expected_salary', expectedSalary);
+      put('availability', availability);
+      put('additional_info', additionalInfo);
+
+      put('resume_file_name', resumeFileName);
+      put('resume_file_url', resumeFileUrl);
+      put('photo_file_name', photoFileName);
+      put('photo_file_url', photoFileUrl);
+
+      if (jobCategories != null) {
+        updatePayload['job_categories'] = jobCategories;
+      }
+
+      // only update if something meaningful exists
+      if (updatePayload.length > 1) {
+        await _db.from('job_applications').update(updatePayload).eq('id', appId);
+      }
+
+      return appId;
+    }
+
+    // 3) create new
+    final insertPayload = <String, dynamic>{
+      'user_id': userId,
+      'name': (name ?? '').trim(),
+      'phone': (phone ?? '').trim(),
+      'email': (email ?? '').trim(),
+      'district': (district ?? '').trim(),
+      'address': (address ?? '').trim(),
+      'education': (education ?? '').trim(),
+      'experience_level': (experienceLevel ?? '').trim(),
+      'experience_details': (experienceDetails ?? '').trim(),
+      'skills': (skills ?? '').trim(),
+      'expected_salary': (expectedSalary ?? '').trim(),
+      'availability': (availability ?? '').trim(),
+      'additional_info': (additionalInfo ?? '').trim(),
+      'resume_file_name': (resumeFileName ?? '').trim(),
+      'resume_file_url': (resumeFileUrl ?? '').trim(),
+      'photo_file_name': (photoFileName ?? '').trim(),
+      'photo_file_url': (photoFileUrl ?? '').trim(),
+      'job_categories': jobCategories ?? <String>[],
+      'created_at': DateTime.now().toIso8601String(),
+      'updated_at': DateTime.now().toIso8601String(),
+      'status': 'submitted',
+    };
+
+    // required fields in schema: name, phone, email, skills
+    if ((insertPayload['name'] as String).trim().isEmpty) {
+      throw Exception("Name is required");
+    }
+    if ((insertPayload['phone'] as String).trim().isEmpty) {
+      throw Exception("Phone is required");
+    }
+    if ((insertPayload['email'] as String).trim().isEmpty) {
+      throw Exception("Email is required");
+    }
+    if ((insertPayload['skills'] as String).trim().isEmpty) {
+      throw Exception("Skills are required");
+    }
+
+    final created = await _db
+        .from('job_applications')
+        .insert(insertPayload)
+        .select('id')
+        .single();
+
+    return created['id'].toString();
+  }
+
+  /// Real apply to a job.
+  ///
+  /// - creates/updates master application in `job_applications`
+  /// - inserts mapping row in `job_applications_listings`
+  /// - returns true if applied, false if already applied
+  Future<bool> applyToJob({
+    required String jobId,
+    required Map<String, dynamic> form,
+  }) async {
+    _ensureAuthenticatedSync();
+    final userId = _userId();
+
+    // 0) already applied guard
+    final already = await hasAppliedToJob(jobId);
+    if (already) return false;
+
+    // 1) load profile (for defaults)
+    final profile = await fetchMyProfile();
+
+    final name = (form['name'] ?? profile['full_name'] ?? '').toString().trim();
+    final phone =
+        (form['phone'] ?? profile['mobile_number'] ?? '').toString().trim();
+    final email = (form['email'] ?? profile['email'] ?? '').toString().trim();
+
+    final district = (form['district'] ?? '').toString().trim();
+    final address = (form['address'] ?? '').toString().trim();
+
+    final education =
+        (form['education'] ?? profile['highest_education'] ?? '')
+            .toString()
+            .trim();
+
+    final experienceLevel = (form['experience_level'] ?? '').toString().trim();
+    final experienceDetails =
+        (form['experience_details'] ?? '').toString().trim();
+
+    // required by schema
+    final skills = (form['skills'] ??
+            _skillsToText(profile['skills']) ??
+            '')
+        .toString()
+        .trim();
+
+    final expectedSalary = (form['expected_salary'] ??
+            _expectedSalaryFromProfile(profile))
+        .toString()
+        .trim();
+
+    final availability = (form['availability'] ?? '').toString().trim();
+    final additionalInfo = (form['additional_info'] ?? '').toString().trim();
+
+    // resume from profile (SIGNED url) is not good for DB.
+    // So fetch raw paths for resume/avatar.
+    final rawPaths = await fetchMyProfileRawPaths();
+
+    final resumeRaw = (rawPaths['resume_url'] ?? '').toString().trim();
+    final photoRaw = (rawPaths['avatar_url'] ?? '').toString().trim();
+
+    // 2) ensure master application exists
+    final applicationId = await _getOrCreateMyMasterApplication(
+      name: name,
+      phone: phone,
+      email: email,
+      district: district,
+      address: address,
+      education: education,
+      experienceLevel: experienceLevel,
+      experienceDetails: experienceDetails,
+      skills: skills,
+      expectedSalary: expectedSalary,
+      availability: availability,
+      additionalInfo: additionalInfo,
+      resumeFileName: resumeRaw.isEmpty ? '' : 'resume',
+      resumeFileUrl: resumeRaw,
+      photoFileName: photoRaw.isEmpty ? '' : 'photo',
+      photoFileUrl: photoRaw,
+      jobCategories: _toStringList(form['job_categories']),
+    );
+
+    // 3) insert listing mapping
+    try {
+      await _db.from('job_applications_listings').insert({
+        'application_id': applicationId,
+        'listing_id': jobId,
+        'user_id': userId,
+        'applied_at': DateTime.now().toIso8601String(),
+        'application_status': 'applied',
+      });
+    } catch (e) {
+      // if unique constraint exists, this catches duplicate apply
+      debugPrint("applyToJob insert error: $e");
+      return false;
+    }
+
+    // 4) track activity (optional)
+    try {
+      await _db.from('user_job_activity').insert({
+        'user_id': userId,
+        'job_id': jobId,
+        'activity_type': 'applied',
+        'activity_date': DateTime.now().toIso8601String(),
+      });
+    } catch (_) {}
+
+    return true;
+  }
+
+  String _skillsToText(dynamic raw) {
+    if (raw == null) return '';
+    if (raw is List) {
+      final items = raw.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+      return items.join(', ');
+    }
+    return raw.toString();
+  }
+
+  String _expectedSalaryFromProfile(Map<String, dynamic> p) {
+    final min = p['expected_salary_min'];
+    final max = p['expected_salary_max'];
+
+    int toInt(dynamic v) {
+      if (v == null) return 0;
+      if (v is int) return v;
+      return int.tryParse(v.toString()) ?? 0;
+    }
+
+    final a = toInt(min);
+    final b = toInt(max);
+
+    if (a <= 0 && b <= 0) return '';
+    if (a > 0 && b <= 0) return "₹$a / month";
+    if (a <= 0 && b > 0) return "Up to ₹$b / month";
+    return "₹$a - ₹$b / month";
+  }
+
+  List<String> _toStringList(dynamic raw) {
+    if (raw == null) return [];
+    if (raw is List) {
+      return raw.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+    }
+    return [];
+  }
   // ============================================================
   // LOCATION HELPERS (Assam nearby logic)
   // ============================================================
