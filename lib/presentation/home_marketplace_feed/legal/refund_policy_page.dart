@@ -31,7 +31,7 @@ class RefundPolicyPage extends StatelessWidget {
             body: """
 This Refund & Cancellation Policy applies to payments made for paid features, subscriptions, or services inside the Khilonjiya mobile application operated by ${AppLinks.companyName}.
 
-This policy applies only to payments made directly through the App.
+Refund eligibility depends on the payment method used (Google Play Billing or direct payments such as Razorpay).
 """,
           ),
 
@@ -42,7 +42,7 @@ If you purchase a subscription:
 • Subscription benefits are delivered digitally and usually activate immediately after successful payment.
 • You will see your subscription status inside the App.
 
-Because digital benefits are delivered instantly, refunds are limited (see Section 4).
+Because subscription benefits are delivered instantly, refunds are limited.
 """,
           ),
 
@@ -54,6 +54,7 @@ You may cancel your subscription at any time.
 Important:
 • Cancellation stops future renewals.
 • Cancellation does NOT automatically refund the current active billing period.
+• You may continue to use benefits until the subscription expiry date.
 """,
           ),
 
@@ -70,15 +71,16 @@ Refunds are NOT provided for:
 • Non-usage of subscription benefits
 • Partial period refunds after activation
 • Network/device issues on the user side
+• Promotional offers / discounted plans (unless legally required)
 """,
           ),
 
           _card(
-            title: "5. Google Play Billing purchases (future)",
+            title: "5. Google Play Billing purchases",
             body: """
 If your subscription is purchased using Google Play Billing:
 • Refunds, cancellations, and renewals are governed by Google Play policies.
-• You may need to request refunds directly through Google Play.
+• Refund requests must be made through Google Play.
 
 In such cases, ${AppLinks.companyName} may not be able to override Google’s refund decision.
 """,
@@ -90,6 +92,7 @@ In such cases, ${AppLinks.companyName} may not be able to override Google’s re
 If your subscription is purchased using Razorpay (or another direct payment method inside the App):
 • Refund decisions are handled by ${AppLinks.companyName}
 • Approved refunds are returned to the original payment method whenever possible
+• We do not provide cash refunds
 """,
           ),
 
