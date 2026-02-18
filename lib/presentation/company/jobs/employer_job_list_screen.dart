@@ -74,6 +74,7 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
 
   void _toast(String msg) {
     if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg)),
     );
@@ -172,14 +173,23 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
   }
 
   // ------------------------------------------------------------
-  // NAV
+  // NAV (FIXED)
   // ------------------------------------------------------------
   Future<void> _openApplicants(String jobId) async {
+    if (_companyId.trim().isEmpty) {
+      _toast("Company not linked. Please contact support.");
+      return;
+    }
+
     await Navigator.pushNamed(
       context,
       AppRoutes.jobApplicants,
-      arguments: jobId,
+      arguments: {
+        'jobId': jobId,
+        'companyId': _companyId,
+      },
     );
+
     await _load(silent: true);
   }
 
@@ -197,12 +207,11 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
         'companyId': _companyId,
       },
     );
+
     await _load(silent: true);
   }
 
   Future<void> _editJob(String jobId) async {
-    // You will add the edit screen later.
-    // For now: reuse create-job screen with args (production safe).
     final res = await Navigator.pushNamed(
       context,
       AppRoutes.createJob,
