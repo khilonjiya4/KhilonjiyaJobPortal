@@ -38,7 +38,7 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
   final _additionalInfo = TextEditingController();
 
   // ------------------------------------------------------------
-  // dropdown values (easy entry)
+  // dropdown values
   // ------------------------------------------------------------
   String _district = '';
   String _education = '';
@@ -198,8 +198,8 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
       }
 
       // 3) raw storage paths for attachments
-      // IMPORTANT: fetchMyProfile() returns SIGNED urls.
-      // For applying we need RAW paths (photos/... and resumes/...)
+      // fetchMyProfile() returns SIGNED urls.
+      // We need RAW paths (resumes/... and photos/...)
       try {
         final raw = await _service.fetchMyProfileRawPaths();
 
@@ -267,6 +267,8 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
 
     setState(() => _submitting = true);
 
+    String insertedApplicationId = '';
+
     try {
       final user = _db.auth.currentUser;
       if (user == null) {
@@ -275,7 +277,7 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
 
       final userId = user.id;
 
-      // 1) prevent duplicate
+      // 1) prevent duplicate apply
       final already = await _db
           .from('job_applications_listings')
           .select('id')
@@ -319,30 +321,34 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
             'additional_info': _additionalInfo.text.trim(),
 
             // attachments
-            'resume_file_name': _resumeFileName.trim(),
-            'resume_file_url': _resumeRawPath.trim(),
-            'photo_file_name': _photoFileName.trim(),
-            'photo_file_url': _photoRawPath.trim(),
+            'resume_file_name': _resumeFileName.trim().isEmpty
+                ? null
+                : _resumeFileName.trim(),
+            'resume_file_url':
+                _resumeRawPath.trim().isEmpty ? null : _resumeRawPath.trim(),
+            'photo_file_name':
+                _photoFileName.trim().isEmpty ? null : _photoFileName.trim(),
+            'photo_file_url':
+                _photoRawPath.trim().isEmpty ? null : _photoRawPath.trim(),
           })
           .select('id')
           .single();
 
-      final applicationId = (insertedApp['id'] ?? '').toString().trim();
-      if (applicationId.isEmpty) {
+      insertedApplicationId = (insertedApp['id'] ?? '').toString().trim();
+      if (insertedApplicationId.isEmpty) {
         throw Exception("Application insert failed (missing id)");
       }
 
       // 3) insert into job_applications_listings
+      // IMPORTANT:
+      // Your schema DOES NOT have pipeline_stage_id.
+      // Pipeline is stored in employer_notes tag.
       await _db.from('job_applications_listings').insert({
         'listing_id': widget.jobId,
-        'application_id': applicationId,
+        'application_id': insertedApplicationId,
         'user_id': userId,
-
         'applied_at': DateTime.now().toIso8601String(),
         'application_status': 'applied',
-
-        // pipeline_stage_id can be null; pipeline UI treats it as Applied
-        'pipeline_stage_id': null,
       });
 
       // 4) success
@@ -350,6 +356,16 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
       _toast("Application submitted");
       Navigator.pop(context, true);
     } catch (e) {
+      // rollback orphan job_applications if listing insert failed
+      try {
+        if (insertedApplicationId.trim().isNotEmpty) {
+          await _db
+              .from('job_applications')
+              .delete()
+              .eq('id', insertedApplicationId);
+        }
+      } catch (_) {}
+
       if (!mounted) return;
       _toast("Failed: ${e.toString()}");
     }
@@ -391,7 +407,11 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
                       _sectionTitle("Basic Details"),
                       const SizedBox(height: 8),
 
-                      _input("Full Name *", _name, textInputAction: TextInputAction.next),
+                      _input(
+                        "Full Name *",
+                        _name,
+                        textInputAction: TextInputAction.next,
+                      ),
                       _input(
                         "Phone *",
                         _phone,
@@ -435,7 +455,11 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
                         items: _experienceOptions,
                         onChanged: (v) => setState(() => _experienceLevel = v),
                       ),
-                      _input("Experience Details (optional)", _experienceDetails, maxLines: 2),
+                      _input(
+                        "Experience Details (optional)",
+                        _experienceDetails,
+                        maxLines: 2,
+                      ),
 
                       const SizedBox(height: 14),
                       _sectionTitle("Skills & Salary"),
@@ -471,7 +495,11 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
                       _sectionTitle("Additional Info"),
                       const SizedBox(height: 8),
 
-                      _input("Cover Note / Additional Info (optional)", _additionalInfo, maxLines: 3),
+                      _input(
+                        "Cover Note / Additional Info (optional)",
+                        _additionalInfo,
+                        maxLines: 3,
+                      ),
 
                       const SizedBox(height: 14),
                       _attachmentsCard(),
@@ -580,13 +608,17 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
           const SizedBox(height: 8),
           _attachRow(
             label: "Resume",
-            value: hasResume ? (_resumeFileName.isEmpty ? "Attached" : _resumeFileName) : "Not uploaded",
+            value: hasResume
+                ? (_resumeFileName.isEmpty ? "Attached" : _resumeFileName)
+                : "Not uploaded",
             ok: hasResume,
           ),
           const SizedBox(height: 6),
           _attachRow(
             label: "Photo",
-            value: hasPhoto ? (_photoFileName.isEmpty ? "Attached" : _photoFileName) : "Not uploaded",
+            value: hasPhoto
+                ? (_photoFileName.isEmpty ? "Attached" : _photoFileName)
+                : "Not uploaded",
             ok: hasPhoto,
           ),
         ],
@@ -673,14 +705,6 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
         .toSet()
         .toList();
 
-    if (!allowEmpty && cleanItems.isNotEmpty && value.trim().isEmpty) {
-      // auto pick first
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        setState(() => onChanged(cleanItems.first));
-      });
-    }
-
     final dropdownItems = <DropdownMenuItem<String>>[];
 
     if (allowEmpty) {
@@ -710,7 +734,9 @@ class _JobApplicationFormState extends State<JobApplicationForm> {
         border: Border.all(color: KhilonjiyaUI.border),
       ),
       child: DropdownButtonFormField<String>(
-        value: allowEmpty ? (value.trim()) : (value.trim().isEmpty ? null : value.trim()),
+        value: allowEmpty
+            ? value.trim()
+            : (value.trim().isEmpty ? null : value.trim()),
         isExpanded: true,
         items: dropdownItems,
         onChanged: (v) {
