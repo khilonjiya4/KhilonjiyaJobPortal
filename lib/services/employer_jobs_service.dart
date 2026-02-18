@@ -1,4 +1,3 @@
-// lib/services/employer_jobs_service.dart
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class EmployerJobsService {
@@ -28,7 +27,19 @@ class EmployerJobsService {
   }) async {
     final user = _requireUser();
 
-    var q = _db.from('job_listings').select('''
+    final s = status.trim().toLowerCase();
+    if (s != 'all' && !allowedStatuses.contains(s)) {
+      throw Exception("Invalid status filter: $status");
+    }
+
+    final searchText = search.trim();
+
+    // IMPORTANT:
+    // After .select() the builder becomes PostgrestTransformBuilder,
+    // so we avoid reassigning it into a typed builder variable.
+    var query = _db
+        .from('job_listings')
+        .select('''
           id,
           company_id,
           employer_id,
@@ -43,24 +54,18 @@ class EmployerJobsService {
           views_count,
           created_at,
           expires_at
-        ''');
+        ''')
+        .eq('employer_id', user.id);
 
-    q = q.eq('employer_id', user.id).order('created_at', ascending: false);
-
-    final s = status.trim().toLowerCase();
     if (s != 'all') {
-      if (!allowedStatuses.contains(s)) {
-        throw Exception("Invalid status filter: $status");
-      }
-      q = q.eq('status', s);
+      query = query.eq('status', s);
     }
 
-    final searchText = search.trim();
     if (searchText.isNotEmpty) {
-      q = q.ilike('job_title', '%$searchText%');
+      query = query.ilike('job_title', '%$searchText%');
     }
 
-    final jobs = await q;
+    final jobs = await query.order('created_at', ascending: false);
 
     final jobList = List<Map<String, dynamic>>.from(jobs);
     if (jobList.isEmpty) return [];
@@ -167,29 +172,42 @@ class EmployerJobsService {
     // 2) delete job_applications_listings
     // 3) delete job_listings
 
-    // 1) Load all listing rows for this job
+    // 1) Load all application listing rows for this job
     final listingRows = await _db
         .from('job_applications_listings')
         .select('id')
         .eq('listing_id', id);
 
     final listingList = List<Map<String, dynamic>>.from(listingRows);
-    final listingIds = listingList.map((e) => (e['id'] ?? '').toString()).where((x) => x.isNotEmpty).toList();
+
+    final listingIds = listingList
+        .map((e) => (e['id'] ?? '').toString())
+        .where((x) => x.isNotEmpty)
+        .toList();
 
     if (listingIds.isNotEmpty) {
       // delete interviews
       try {
-        await _db.from('interviews').delete().inFilter('job_application_listing_id', listingIds);
+        await _db
+            .from('interviews')
+            .delete()
+            .inFilter('job_application_listing_id', listingIds);
       } catch (_) {}
 
       // delete application events
       try {
-        await _db.from('application_events').delete().inFilter('job_application_listing_id', listingIds);
+        await _db
+            .from('application_events')
+            .delete()
+            .inFilter('job_application_listing_id', listingIds);
       } catch (_) {}
 
       // delete stage history
       try {
-        await _db.from('application_stage_history').delete().inFilter('job_application_listing_id', listingIds);
+        await _db
+            .from('application_stage_history')
+            .delete()
+            .inFilter('job_application_listing_id', listingIds);
       } catch (_) {}
     }
 
@@ -204,7 +222,11 @@ class EmployerJobsService {
     }
 
     // 3) delete the job itself
-    await _db.from('job_listings').delete().eq('id', id).eq('employer_id', user.id);
+    await _db
+        .from('job_listings')
+        .delete()
+        .eq('id', id)
+        .eq('employer_id', user.id);
   }
 
   // ------------------------------------------------------------
