@@ -12,6 +12,15 @@ import '../presentation/home_marketplace_feed/job_seeker_main_shell.dart';
 // PROFILE EDIT (PUSH PAGE)
 import '../presentation/home_marketplace_feed/profile_edit_page.dart';
 
+// SETTINGS + PAGES
+import '../presentation/home_marketplace_feed/settings_page.dart';
+import '../presentation/home_marketplace_feed/notification_settings_page.dart';
+import '../presentation/home_marketplace_feed/privacy_settings_page.dart';
+import '../presentation/home_marketplace_feed/language_settings_page.dart';
+import '../presentation/home_marketplace_feed/about_page.dart';
+import '../presentation/home_marketplace_feed/policies_page.dart';
+import '../presentation/home_marketplace_feed/webview_page.dart';
+
 // EMPLOYER
 import '../presentation/company/dashboard/company_dashboard.dart';
 import '../presentation/company/jobs/create_job_screen.dart';
@@ -46,6 +55,17 @@ class AppRoutes {
   static const String jobSeekerHome = '/job-seeker-home';
   static const String profileEdit = '/profile-edit';
 
+  // Settings
+  static const String settings = '/settings';
+  static const String notificationSettings = '/settings-notifications';
+  static const String privacySettings = '/settings-privacy';
+  static const String languageSettings = '/settings-language';
+  static const String about = '/about';
+  static const String policies = '/policies';
+
+  // WebView
+  static const String webview = '/webview';
+
   // ------------------------------------------------------------
   // EMPLOYER
   // ------------------------------------------------------------
@@ -79,6 +99,14 @@ class AppRoutes {
     // Profile edit
     profileEdit: (_) => const ProfileEditPage(),
 
+    // Settings
+    settings: (_) => const SettingsPage(),
+    notificationSettings: (_) => const NotificationSettingsPage(),
+    privacySettings: (_) => const PrivacySettingsPage(),
+    languageSettings: (_) => const LanguageSettingsPage(),
+    about: (_) => const AboutPage(),
+    policies: (_) => const PoliciesPage(),
+
     // Employer
     companyDashboard: (_) => const CompanyDashboard(),
     employerJobs: (_) => const EmployerJobListScreen(),
@@ -105,6 +133,36 @@ class AppRoutes {
 
         return MaterialPageRoute(
           builder: (_) => JobApplicantsScreen(jobId: jobId),
+        );
+
+      case webview:
+        final args = settings.arguments;
+
+        if (args == null || args is! Map) {
+          return MaterialPageRoute(
+            builder: (_) => const Scaffold(
+              body: Center(
+                child: Text("Invalid WebView arguments"),
+              ),
+            ),
+          );
+        }
+
+        final title = (args['title'] ?? '').toString().trim();
+        final url = (args['url'] ?? '').toString().trim();
+
+        if (title.isEmpty || url.isEmpty) {
+          return MaterialPageRoute(
+            builder: (_) => const Scaffold(
+              body: Center(
+                child: Text("Missing title or url"),
+              ),
+            ),
+          );
+        }
+
+        return MaterialPageRoute(
+          builder: (_) => WebViewPage(title: title, url: url),
         );
     }
 
