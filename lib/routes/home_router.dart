@@ -16,13 +16,11 @@ class HomeRouter extends StatefulWidget {
 
 class _HomeRouterState extends State<HomeRouter> {
   late final MobileAuthService _auth;
-  late final Future<UserRole?> _roleFuture;
 
   @override
   void initState() {
     super.initState();
     _auth = MobileAuthService();
-    _roleFuture = _resolveRoleOrNull();
   }
 
   Future<UserRole?> _resolveRoleOrNull() async {
@@ -47,8 +45,11 @@ class _HomeRouterState extends State<HomeRouter> {
 
   @override
   Widget build(BuildContext context) {
+    // IMPORTANT:
+    // Do NOT store the future in initState.
+    // We must resolve role again after login.
     return FutureBuilder<UserRole?>(
-      future: _roleFuture,
+      future: _resolveRoleOrNull(),
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
           return const Scaffold(
@@ -58,7 +59,7 @@ class _HomeRouterState extends State<HomeRouter> {
 
         final role = snap.data;
 
-        // ❌ No session → go RoleSelection
+        // No session → go RoleSelection
         if (role == null) {
           _goToRoleSelection();
           return const Scaffold(
@@ -66,12 +67,12 @@ class _HomeRouterState extends State<HomeRouter> {
           );
         }
 
-        // ✅ Role based routing
+        // Role based routing
         if (role == UserRole.employer) {
           return const CompanyDashboard();
         }
 
-        // ✅ Job seeker must go into Bottom Navigation shell
+        // Job seeker
         return const JobSeekerMainShell();
       },
     );
