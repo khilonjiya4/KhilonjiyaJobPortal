@@ -36,7 +36,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
 
   // Filters
   String _filter = 'all';
-  final _search = TextEditingController();
+  final TextEditingController _search = TextEditingController();
 
   // UI tokens
   static const Color _bg = Color(0xFFF7F8FA);
@@ -63,6 +63,13 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg)),
     );
+  }
+
+  Map<String, dynamic> _asMap(dynamic v) {
+    if (v == null) return {};
+    if (v is Map<String, dynamic>) return v;
+    if (v is Map) return Map<String, dynamic>.from(v);
+    return {};
   }
 
   Future<void> _load() async {
@@ -105,7 +112,8 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
 
       if (q.isEmpty) return true;
 
-      final app = (r['job_applications'] ?? {}) as Map;
+      final app = _asMap(r['job_applications']);
+
       final name = (app['name'] ?? '').toString().toLowerCase();
       final phone = (app['phone'] ?? '').toString().toLowerCase();
       final email = (app['email'] ?? '').toString().toLowerCase();
@@ -144,7 +152,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
 
   Future<void> _scheduleInterview(Map<String, dynamic> row) async {
     if (_resolvedCompanyId.trim().isEmpty) {
-      _toast("Company not linked to job. Please contact support.");
+      _toast("Organization not linked to job. Please contact support.");
       return;
     }
 
@@ -277,7 +285,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
   // OPEN RESUME (REAL)
   // ------------------------------------------------------------
   Future<void> _openResume(Map<String, dynamic> row) async {
-    final app = (row['job_applications'] ?? {}) as Map;
+    final app = _asMap(row['job_applications']);
     final url = (app['resume_file_url'] ?? '').toString().trim();
 
     if (url.isEmpty) {
@@ -300,7 +308,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
   void _openApplicant(Map<String, dynamic> row) async {
     await _markViewedIfNeeded(row);
 
-    final app = (row['job_applications'] ?? {}) as Map;
+    final app = _asMap(row['job_applications']);
 
     final name = (app['name'] ?? 'Candidate').toString();
     final phone = (app['phone'] ?? '').toString();
@@ -365,8 +373,10 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                   _kv("District", district.isEmpty ? "Not provided" : district),
                   _kv("Education", edu.isEmpty ? "Not provided" : edu),
                   _kv("Experience", exp.isEmpty ? "Not provided" : exp),
-                  _kv("Expected Salary",
-                      salary.isEmpty ? "Not provided" : salary),
+                  _kv(
+                    "Expected Salary",
+                    salary.isEmpty ? "Not provided" : salary,
+                  ),
                   if (interviewDate != null)
                     _kv("Interview", _formatDateTime(interviewDate)),
                   const SizedBox(height: 12),
@@ -747,7 +757,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
   // UI: LIST ITEM
   // ------------------------------------------------------------
   Widget _applicantTile(Map<String, dynamic> row) {
-    final app = (row['job_applications'] ?? {}) as Map;
+    final app = _asMap(row['job_applications']);
 
     final name = (app['name'] ?? 'Candidate').toString();
     final district = (app['district'] ?? '').toString();
