@@ -15,17 +15,13 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
   final SupabaseClient _client = Supabase.instance.client;
 
   // ------------------------------------------------------------
-  // CONTROLLERS (Schema)
+  // JOB CONTROLLERS (REAL SCHEMA)
   // ------------------------------------------------------------
-  final _companyNameCtrl = TextEditingController();
-  final _contactPersonCtrl = TextEditingController();
-  final _phoneCtrl = TextEditingController();
-  final _emailCtrl = TextEditingController();
-
   final _jobTitleCtrl = TextEditingController();
 
   final _jobDescriptionCtrl = TextEditingController();
   final _requirementsCtrl = TextEditingController();
+  final _responsibilitiesCtrl = TextEditingController();
 
   final _educationCtrl = TextEditingController();
   final _experienceCtrl = TextEditingController();
@@ -33,7 +29,6 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
   final _salaryMinCtrl = TextEditingController();
   final _salaryMaxCtrl = TextEditingController();
 
-  final _districtCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
 
   final _openingsCtrl = TextEditingController(text: "1");
@@ -42,21 +37,45 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
   final _benefitsCtrl = TextEditingController();
   final _additionalInfoCtrl = TextEditingController();
 
-  // Dropdowns
+  final _walkInDetailsCtrl = TextEditingController();
+
+  // ------------------------------------------------------------
+  // DROPDOWNS
+  // ------------------------------------------------------------
   String _jobType = "Full-time";
   String _employmentType = "Permanent";
   String _workMode = "On-site";
   String _salaryPeriod = "Monthly";
   String _hiringUrgency = "Normal";
 
-  // Category from master table
+  bool _isWalkIn = false;
+
+  // ------------------------------------------------------------
+  // MASTER TABLES
+  // ------------------------------------------------------------
   bool _loadingCategories = true;
   List<String> _categories = [];
   String? _selectedCategory;
 
-  bool _loading = false;
+  bool _loadingDistricts = true;
+  List<String> _districts = [];
+  String? _selectedDistrict;
 
-  // Wizard step
+  // ------------------------------------------------------------
+  // COMPANY (ORGANIZATION)
+  // ------------------------------------------------------------
+  bool _loadingCompanies = true;
+
+  // Each item: { id, name }
+  List<Map<String, dynamic>> _myCompanies = [];
+
+  String? _selectedCompanyId;
+  String? _selectedCompanyName;
+
+  // ------------------------------------------------------------
+  // UI STATE
+  // ------------------------------------------------------------
+  bool _loading = false;
   int _step = 0;
 
   final List<String> _jobTypes = const [
@@ -105,20 +124,24 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
   @override
   void initState() {
     super.initState();
-    _loadCategories();
+    _loadEverything();
+  }
+
+  Future<void> _loadEverything() async {
+    await Future.wait([
+      _loadCompanies(),
+      _loadCategories(),
+      _loadDistricts(),
+    ]);
   }
 
   @override
   void dispose() {
-    _companyNameCtrl.dispose();
-    _contactPersonCtrl.dispose();
-    _phoneCtrl.dispose();
-    _emailCtrl.dispose();
-
     _jobTitleCtrl.dispose();
 
     _jobDescriptionCtrl.dispose();
     _requirementsCtrl.dispose();
+    _responsibilitiesCtrl.dispose();
 
     _educationCtrl.dispose();
     _experienceCtrl.dispose();
@@ -126,20 +149,92 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
     _salaryMinCtrl.dispose();
     _salaryMaxCtrl.dispose();
 
-    _districtCtrl.dispose();
     _addressCtrl.dispose();
-
     _openingsCtrl.dispose();
 
     _skillsCtrl.dispose();
     _benefitsCtrl.dispose();
     _additionalInfoCtrl.dispose();
 
+    _walkInDetailsCtrl.dispose();
+
     super.dispose();
   }
 
   // ------------------------------------------------------------
-  // CATEGORIES
+  // LOAD: COMPANIES WHERE I AM ACTIVE MEMBER
+  // ------------------------------------------------------------
+  Future<void> _loadCompanies() async {
+    try {
+      final user = _client.auth.currentUser;
+      if (user == null) {
+        if (!mounted) return;
+        setState(() {
+          _myCompanies = [];
+          _selectedCompanyId = null;
+          _selectedCompanyName = null;
+          _loadingCompanies = false;
+        });
+        return;
+      }
+
+      final res = await _client
+          .from("company_members")
+          .select("company_id, companies(id, name)")
+          .eq("user_id", user.id)
+          .eq("status", "active");
+
+      final list = List<Map<String, dynamic>>.from(res);
+
+      final companies = <Map<String, dynamic>>[];
+
+      for (final row in list) {
+        final c = row["companies"];
+        if (c == null) continue;
+
+        final id = (c["id"] ?? "").toString();
+        final name = (c["name"] ?? "").toString();
+
+        if (id.trim().isEmpty || name.trim().isEmpty) continue;
+
+        companies.add({
+          "id": id,
+          "name": name,
+        });
+      }
+
+      companies.sort((a, b) => (a["name"] as String)
+          .toLowerCase()
+          .compareTo((b["name"] as String).toLowerCase()));
+
+      if (!mounted) return;
+
+      setState(() {
+        _myCompanies = companies;
+
+        if (companies.isNotEmpty) {
+          _selectedCompanyId = companies.first["id"];
+          _selectedCompanyName = companies.first["name"];
+        } else {
+          _selectedCompanyId = null;
+          _selectedCompanyName = null;
+        }
+
+        _loadingCompanies = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _myCompanies = [];
+        _selectedCompanyId = null;
+        _selectedCompanyName = null;
+        _loadingCompanies = false;
+      });
+    }
+  }
+
+  // ------------------------------------------------------------
+  // LOAD: CATEGORIES
   // ------------------------------------------------------------
   Future<void> _loadCategories() async {
     try {
@@ -172,7 +267,297 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
   }
 
   // ------------------------------------------------------------
-  // SUBMIT
+  // LOAD: DISTRICTS
+  // ------------------------------------------------------------
+  Future<void> _loadDistricts() async {
+    try {
+      final res = await _client
+          .from("assam_districts_master")
+          .select("district_name")
+          .order("district_name", ascending: true);
+
+      final items = List<Map<String, dynamic>>.from(res)
+          .map((e) => (e["district_name"] ?? "").toString())
+          .where((e) => e.trim().isNotEmpty)
+          .toList();
+
+      if (!mounted) return;
+
+      setState(() {
+        _districts = items;
+        _selectedDistrict = items.isNotEmpty ? items.first : null;
+        _loadingDistricts = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _districts = [];
+        _selectedDistrict = null;
+        _loadingDistricts = false;
+      });
+    }
+  }
+
+  // ------------------------------------------------------------
+  // QUICK CREATE ORGANIZATION (COMPANY)
+  // ------------------------------------------------------------
+  Future<void> _quickCreateOrganization() async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      _showError("Session expired. Please login again.");
+      return;
+    }
+
+    final nameCtrl = TextEditingController();
+    final cityCtrl = TextEditingController();
+    final stateCtrl = TextEditingController(text: "Assam");
+    final websiteCtrl = TextEditingController();
+    final descCtrl = TextEditingController();
+
+    String? selectedBusinessTypeId;
+
+    bool saving = false;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            Future<List<Map<String, dynamic>>> loadBusinessTypes() async {
+              final res = await _client
+                  .from("business_types_master")
+                  .select("id, type_name")
+                  .eq("is_active", true)
+                  .order("type_name", ascending: true);
+
+              return List<Map<String, dynamic>>.from(res);
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 4.w,
+                right: 4.w,
+                top: 2.h,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 2.h,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Create Organization",
+                    style: TextStyle(
+                      fontSize: 16.5,
+                      fontWeight: FontWeight.w900,
+                      color: _text,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    "Create an organization first, then post jobs under it.",
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: _muted,
+                      height: 1.25,
+                    ),
+                  ),
+                  SizedBox(height: 2.h),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: _inputDecoration(label: "Organization Name"),
+                  ),
+                  SizedBox(height: 1.2.h),
+                  FutureBuilder(
+                    future: loadBusinessTypes(),
+                    builder: (ctx, snap) {
+                      if (!snap.hasData) {
+                        return _infoBox(
+                          text: "Loading business types...",
+                          icon: Icons.hourglass_bottom_rounded,
+                        );
+                      }
+
+                      final items = snap.data as List<Map<String, dynamic>>;
+
+                      if (items.isEmpty) {
+                        return _errorBox(
+                          text: "No business types found",
+                          actionText: "Close",
+                          onAction: () => Navigator.pop(ctx),
+                        );
+                      }
+
+                      selectedBusinessTypeId ??= items.first["id"].toString();
+
+                      return DropdownButtonFormField<String>(
+                        value: selectedBusinessTypeId,
+                        items: items
+                            .map(
+                              (e) => DropdownMenuItem(
+                                value: e["id"].toString(),
+                                child: Text(
+                                  (e["type_name"] ?? "").toString(),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: _text,
+                                  ),
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (v) {
+                          if (v == null) return;
+                          setModalState(() => selectedBusinessTypeId = v);
+                        },
+                        decoration:
+                            _inputDecoration(label: "Type of Business"),
+                        icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                        dropdownColor: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                      );
+                    },
+                  ),
+                  SizedBox(height: 1.2.h),
+                  TextField(
+                    controller: cityCtrl,
+                    decoration: _inputDecoration(label: "City (optional)"),
+                  ),
+                  SizedBox(height: 1.2.h),
+                  TextField(
+                    controller: stateCtrl,
+                    decoration: _inputDecoration(label: "State (optional)"),
+                  ),
+                  SizedBox(height: 1.2.h),
+                  TextField(
+                    controller: websiteCtrl,
+                    decoration: _inputDecoration(label: "Website (optional)"),
+                  ),
+                  SizedBox(height: 1.2.h),
+                  TextField(
+                    controller: descCtrl,
+                    minLines: 3,
+                    maxLines: 6,
+                    decoration:
+                        _inputDecoration(label: "Description (optional)"),
+                  ),
+                  SizedBox(height: 2.h),
+                  SizedBox(
+                    height: 48,
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: saving
+                          ? null
+                          : () async {
+                              final name = nameCtrl.text.trim();
+                              if (name.isEmpty) return;
+
+                              if (selectedBusinessTypeId == null ||
+                                  selectedBusinessTypeId!.trim().isEmpty) {
+                                return;
+                              }
+
+                              setModalState(() => saving = true);
+
+                              try {
+                                // 1) Create company
+                                final inserted = await _client
+                                    .from("companies")
+                                    .insert({
+                                      "name": name,
+                                      "headquarters_city": cityCtrl.text.trim()
+                                              .isEmpty
+                                          ? null
+                                          : cityCtrl.text.trim(),
+                                      "headquarters_state":
+                                          stateCtrl.text.trim().isEmpty
+                                              ? null
+                                              : stateCtrl.text.trim(),
+                                      "website": websiteCtrl.text.trim().isEmpty
+                                          ? null
+                                          : websiteCtrl.text.trim(),
+                                      "description": descCtrl.text.trim().isEmpty
+                                          ? null
+                                          : descCtrl.text.trim(),
+                                      "business_type_id": selectedBusinessTypeId,
+                                      "created_by": user.id,
+                                    })
+                                    .select("id, name")
+                                    .single();
+
+                                final companyId = inserted["id"].toString();
+                                final companyName =
+                                    (inserted["name"] ?? "").toString();
+
+                                // 2) Add creator as active member
+                                await _client.from("company_members").insert({
+                                  "company_id": companyId,
+                                  "user_id": user.id,
+                                  "status": "active",
+                                  "role": "recruiter",
+                                });
+
+                                if (!mounted) return;
+
+                                Navigator.pop(ctx);
+
+                                // refresh list
+                                await _loadCompanies();
+
+                                // auto-select new company
+                                setState(() {
+                                  _selectedCompanyId = companyId;
+                                  _selectedCompanyName = companyName;
+                                });
+
+                                _showSuccess("Organization created");
+                              } catch (_) {
+                                _showError("Failed to create organization");
+                              }
+
+                              setModalState(() => saving = false);
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _primary,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: saving
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.6,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.white,
+                                ),
+                              ),
+                            )
+                          : const Text(
+                              "Create",
+                              style: TextStyle(fontWeight: FontWeight.w900),
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ------------------------------------------------------------
+  // SUBMIT JOB (REAL INSERT)
   // ------------------------------------------------------------
   Future<void> _submit() async {
     if (_loading) return;
@@ -180,8 +565,18 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
     final ok = _formKey.currentState?.validate() ?? false;
     if (!ok) return;
 
+    if (_selectedCompanyId == null || _selectedCompanyId!.trim().isEmpty) {
+      _showError("Please select an organization");
+      return;
+    }
+
     if (_selectedCategory == null || _selectedCategory!.trim().isEmpty) {
       _showError("Please select a job category");
+      return;
+    }
+
+    if (_selectedDistrict == null || _selectedDistrict!.trim().isEmpty) {
+      _showError("Please select a district");
       return;
     }
 
@@ -210,6 +605,11 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
       return;
     }
 
+    if (_isWalkIn && _walkInDetailsCtrl.text.trim().isEmpty) {
+      _showError("Please enter walk-in details");
+      return;
+    }
+
     setState(() => _loading = true);
 
     try {
@@ -220,40 +620,40 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
           .toList();
 
       await _client.from("job_listings").insert({
-        // owner
-        "user_id": user.id,
+        // REQUIRED (REAL)
+        "employer_id": user.id,
+        "company_id": _selectedCompanyId,
 
-        // company
-        "company_name": _companyNameCtrl.text.trim(),
-        "contact_person": _contactPersonCtrl.text.trim(),
-        "phone": _phoneCtrl.text.trim(),
-        "email": _emailCtrl.text.trim(),
-
-        // job
+        // REQUIRED (REAL)
         "job_title": _jobTitleCtrl.text.trim(),
-        "job_category": _selectedCategory!,
+        "job_category": _selectedCategory,
         "job_type": _jobType,
         "employment_type": _employmentType,
         "work_mode": _workMode,
 
-        // details
+        // REQUIRED (REAL)
         "job_description": _jobDescriptionCtrl.text.trim(),
         "requirements": _requirementsCtrl.text.trim(),
         "education_required": _educationCtrl.text.trim(),
         "experience_required": _experienceCtrl.text.trim(),
 
-        // salary
+        // REQUIRED (REAL)
         "salary_min": salaryMin,
         "salary_max": salaryMax,
         "salary_period": _salaryPeriod,
         "salary_currency": "INR",
 
-        // location
-        "district": _districtCtrl.text.trim(),
+        // REQUIRED (REAL)
+        "district": _selectedDistrict,
         "job_address": _addressCtrl.text.trim(),
 
-        // other
+        // REQUIRED (REAL)
         "hiring_urgency": _hiringUrgency,
+
+        // OPTIONAL
+        "responsibilities": _responsibilitiesCtrl.text.trim().isEmpty
+            ? null
+            : _responsibilitiesCtrl.text.trim(),
         "benefits":
             _benefitsCtrl.text.trim().isEmpty ? null : _benefitsCtrl.text.trim(),
         "additional_info": _additionalInfoCtrl.text.trim().isEmpty
@@ -263,26 +663,21 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
         "skills_required": skills.isEmpty ? null : skills,
         "number_of_openings": openings,
 
-        // status must match schema enum
+        "is_walk_in": _isWalkIn,
+        "walk_in_details": _isWalkIn ? _walkInDetailsCtrl.text.trim() : null,
+
+        // must match enum
         "status": "active",
       });
 
       if (!mounted) return;
       Navigator.pop(context, true);
     } catch (_) {
-      _showError("Failed to create job");
+      _showError("Failed to create job (check RLS + required fields)");
     }
 
     if (!mounted) return;
     setState(() => _loading = false);
-  }
-
-  void _showError(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg)),
-    );
   }
 
   // ------------------------------------------------------------
@@ -294,46 +689,34 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
     return null;
   }
 
-  String? _phoneValidator(String? v) {
-    final value = (v ?? "").trim();
-    if (value.isEmpty) return "Required";
-    if (value.length != 10) return "Enter valid 10-digit number";
-    return null;
-  }
-
-  String? _emailValidator(String? v) {
-    final value = (v ?? "").trim();
-    if (value.isEmpty) return "Required";
-    final ok = RegExp(r"^[^@\s]+@[^@\s]+\.[^@\s]+$").hasMatch(value);
-    if (!ok) return "Enter valid email";
-    return null;
-  }
-
   // ------------------------------------------------------------
-  // STEP VALIDATION (Wizard)
+  // STEP VALIDATION
   // ------------------------------------------------------------
   bool _isStepValid(int step) {
+    // step 0: company
     if (step == 0) {
-      return _companyNameCtrl.text.trim().isNotEmpty &&
-          _contactPersonCtrl.text.trim().isNotEmpty &&
-          _phoneCtrl.text.trim().length == 10 &&
-          _emailCtrl.text.trim().isNotEmpty;
+      return _selectedCompanyId != null && _selectedCompanyId!.trim().isNotEmpty;
     }
 
+    // step 1: job
     if (step == 1) {
       return _jobTitleCtrl.text.trim().isNotEmpty &&
           (_selectedCategory ?? '').trim().isNotEmpty;
     }
 
+    // step 2: requirements
     if (step == 2) {
       return _jobDescriptionCtrl.text.trim().isNotEmpty &&
           _requirementsCtrl.text.trim().isNotEmpty &&
+          _educationCtrl.text.trim().isNotEmpty &&
+          _experienceCtrl.text.trim().isNotEmpty &&
           _salaryMinCtrl.text.trim().isNotEmpty &&
           _salaryMaxCtrl.text.trim().isNotEmpty;
     }
 
+    // step 3: location
     if (step == 3) {
-      return _districtCtrl.text.trim().isNotEmpty &&
+      return (_selectedDistrict ?? '').trim().isNotEmpty &&
           _addressCtrl.text.trim().isNotEmpty;
     }
 
@@ -400,8 +783,6 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
               ),
             ),
           ),
-
-          // Sticky action bar
           Positioned(
             left: 0,
             right: 0,
@@ -464,7 +845,7 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
                 ),
                 SizedBox(height: 4),
                 Text(
-                  "Fill details carefully. Candidates will see this exactly as entered.",
+                  "Select organization, then fill job details.",
                   style: TextStyle(
                     fontSize: 12.6,
                     fontWeight: FontWeight.w600,
@@ -481,11 +862,11 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
   }
 
   // ------------------------------------------------------------
-  // STEPPER (Fluent minimal)
+  // STEPPER
   // ------------------------------------------------------------
   Widget _stepIndicator() {
     final steps = const [
-      ("Company", Icons.apartment_rounded),
+      ("Organization", Icons.apartment_rounded),
       ("Job", Icons.work_outline_rounded),
       ("Requirements", Icons.rule_rounded),
       ("Location", Icons.location_on_rounded),
@@ -514,7 +895,9 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
 
               final Color dotFg = isDone
                   ? const Color(0xFF166534)
-                  : (isActive ? const Color(0xFF1D4ED8) : const Color(0xFF475569));
+                  : (isActive
+                      ? const Color(0xFF1D4ED8)
+                      : const Color(0xFF475569));
 
               return Expanded(
                 child: Row(
@@ -575,41 +958,96 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
   // STEP BODY
   // ------------------------------------------------------------
   Widget _stepBody() {
-    if (_step == 0) return _stepCompany();
+    if (_step == 0) return _stepOrganization();
     if (_step == 1) return _stepJob();
     if (_step == 2) return _stepRequirements();
     return _stepLocation();
   }
 
-  Widget _stepCompany() {
+  // STEP 0
+  Widget _stepOrganization() {
     return _cardSection(
-      title: "Company Details",
-      subtitle: "Basic information shown to candidates",
+      title: "Organization",
+      subtitle: "Select the organization where you want to post this job",
       child: Column(
         children: [
-          _field("Company Name", _companyNameCtrl),
-          _field("Contact Person", _contactPersonCtrl),
-          _field(
-            "Phone",
-            _phoneCtrl,
-            validator: _phoneValidator,
-            keyboard: TextInputType.phone,
-            formatters: [
-              FilteringTextInputFormatter.digitsOnly,
-              LengthLimitingTextInputFormatter(10),
-            ],
-          ),
-          _field(
-            "Email",
-            _emailCtrl,
-            validator: _emailValidator,
-            keyboard: TextInputType.emailAddress,
+          if (_loadingCompanies)
+            _infoBox(
+              text: "Loading your organizations...",
+              icon: Icons.hourglass_bottom_rounded,
+            )
+          else if (_myCompanies.isEmpty)
+            _errorBox(
+              text: "No organization found. Create one first.",
+              actionText: "Create",
+              onAction: _quickCreateOrganization,
+            )
+          else
+            _companyDropdown(),
+          SizedBox(height: 1.2.h),
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: OutlinedButton.icon(
+              onPressed: _loading ? null : _quickCreateOrganization,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text(
+                "Create new organization",
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _text,
+                side: const BorderSide(color: _line),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
+  Widget _companyDropdown() {
+    final selectedId = _selectedCompanyId;
+
+    return DropdownButtonFormField<String>(
+      value: selectedId,
+      items: _myCompanies
+          .map(
+            (c) => DropdownMenuItem(
+              value: c["id"].toString(),
+              child: Text(
+                c["name"].toString(),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: _text,
+                ),
+              ),
+            ),
+          )
+          .toList(),
+      onChanged: (v) {
+        if (v == null) return;
+
+        final found =
+            _myCompanies.where((e) => e["id"].toString() == v).toList();
+
+        setState(() {
+          _selectedCompanyId = v;
+          _selectedCompanyName =
+              found.isNotEmpty ? found.first["name"].toString() : null;
+        });
+      },
+      decoration: _inputDecoration(label: "Select Organization"),
+      icon: const Icon(Icons.keyboard_arrow_down_rounded),
+      dropdownColor: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+    );
+  }
+
+  // STEP 1
   Widget _stepJob() {
     return _cardSection(
       title: "Job Details",
@@ -635,6 +1073,7 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
     );
   }
 
+  // STEP 2
   Widget _stepRequirements() {
     return Column(
       children: [
@@ -682,6 +1121,11 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
             children: [
               _multilineField("Job Description", _jobDescriptionCtrl),
               _multilineField("Requirements", _requirementsCtrl),
+              _multilineField(
+                "Responsibilities (optional)",
+                _responsibilitiesCtrl,
+                required: false,
+              ),
               _field("Education Required", _educationCtrl),
               _field("Experience Required", _experienceCtrl),
               _field(
@@ -697,6 +1141,7 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
     );
   }
 
+  // STEP 3
   Widget _stepLocation() {
     return Column(
       children: [
@@ -705,7 +1150,7 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
           subtitle: "Where the candidate will work",
           child: Column(
             children: [
-              _field("District", _districtCtrl),
+              _districtDropdown(),
               _multilineField("Full Job Address", _addressCtrl),
             ],
           ),
@@ -732,6 +1177,30 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
                   LengthLimitingTextInputFormatter(3),
                 ],
               ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text(
+                  "Walk-in interview",
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: _text,
+                  ),
+                ),
+                subtitle: const Text(
+                  "Enable if candidates can directly come for interview",
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: _muted,
+                  ),
+                ),
+                value: _isWalkIn,
+                onChanged: (v) => setState(() => _isWalkIn = v),
+              ),
+              if (_isWalkIn)
+                _multilineField(
+                  "Walk-in details",
+                  _walkInDetailsCtrl,
+                ),
               _multilineField(
                 "Benefits (optional)",
                 _benefitsCtrl,
@@ -750,7 +1219,7 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
   }
 
   // ------------------------------------------------------------
-  // BOTTOM ACTION BAR
+  // BOTTOM BAR
   // ------------------------------------------------------------
   Widget _bottomActionBar() {
     final bool canGoBack = _step > 0;
@@ -825,6 +1294,69 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
   }
 
   // ------------------------------------------------------------
+  // DROPDOWNS (CATEGORIES + DISTRICTS)
+  // ------------------------------------------------------------
+  Widget _categoryDropdown() {
+    if (_loadingCategories) {
+      return Padding(
+        padding: EdgeInsets.only(bottom: 1.5.h),
+        child: _infoBox(
+          text: "Loading categories...",
+          icon: Icons.hourglass_bottom_rounded,
+        ),
+      );
+    }
+
+    if (_categories.isEmpty) {
+      return Padding(
+        padding: EdgeInsets.only(bottom: 1.5.h),
+        child: _errorBox(
+          text: "No job categories found in database",
+          actionText: "Retry",
+          onAction: _loadCategories,
+        ),
+      );
+    }
+
+    return _dropdown(
+      "Job Category",
+      _selectedCategory!,
+      _categories,
+      (v) => setState(() => _selectedCategory = v),
+    );
+  }
+
+  Widget _districtDropdown() {
+    if (_loadingDistricts) {
+      return Padding(
+        padding: EdgeInsets.only(bottom: 1.5.h),
+        child: _infoBox(
+          text: "Loading districts...",
+          icon: Icons.hourglass_bottom_rounded,
+        ),
+      );
+    }
+
+    if (_districts.isEmpty) {
+      return Padding(
+        padding: EdgeInsets.only(bottom: 1.5.h),
+        child: _errorBox(
+          text: "No districts found in database",
+          actionText: "Retry",
+          onAction: _loadDistricts,
+        ),
+      );
+    }
+
+    return _dropdown(
+      "District",
+      _selectedDistrict!,
+      _districts,
+      (v) => setState(() => _selectedDistrict = v),
+    );
+  }
+
+  // ------------------------------------------------------------
   // UI HELPERS
   // ------------------------------------------------------------
   Widget _cardSection({
@@ -873,36 +1405,6 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
           child,
         ],
       ),
-    );
-  }
-
-  Widget _categoryDropdown() {
-    if (_loadingCategories) {
-      return Padding(
-        padding: EdgeInsets.only(bottom: 1.5.h),
-        child: _infoBox(
-          text: "Loading categories...",
-          icon: Icons.hourglass_bottom_rounded,
-        ),
-      );
-    }
-
-    if (_categories.isEmpty) {
-      return Padding(
-        padding: EdgeInsets.only(bottom: 1.5.h),
-        child: _errorBox(
-          text: "No job categories found in database",
-          actionText: "Retry",
-          onAction: _loadCategories,
-        ),
-      );
-    }
-
-    return _dropdown(
-      "Job Category",
-      _selectedCategory!,
-      _categories,
-      (v) => setState(() => _selectedCategory = v),
     );
   }
 
@@ -1106,6 +1608,25 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // SNACKS
+  // ------------------------------------------------------------
+  void _showError(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg)),
+    );
+  }
+
+  void _showSuccess(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg)),
     );
   }
 }
