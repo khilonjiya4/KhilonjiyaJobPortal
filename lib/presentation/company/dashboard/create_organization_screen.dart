@@ -69,19 +69,20 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
     setState(() => _loading = true);
 
     try {
-      // districts
+      // districts (REAL TABLE)
       final dRes = await _db
-          .from('master_districts')
-          .select('id,name')
-          .order('name', ascending: true);
+          .from('assam_districts_master')
+          .select('id, district_name')
+          .order('district_name', ascending: true);
 
       _districts = List<Map<String, dynamic>>.from(dRes);
 
-      // business types
+      // business types (REAL TABLE)
       final bRes = await _db
-          .from('master_business_types')
-          .select('id,name')
-          .order('name', ascending: true);
+          .from('business_types_master')
+          .select('id, type_name')
+          .eq('is_active', true)
+          .order('type_name', ascending: true);
 
       _businessTypes = List<Map<String, dynamic>>.from(bRes);
     } catch (e) {
@@ -131,7 +132,6 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
 
       if (!mounted) return;
 
-      // IMPORTANT:
       // Return to dashboard and let it reload.
       Navigator.pop(context, true);
 
@@ -196,7 +196,7 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
                       value: _selectedBusinessType,
                       hint: "Select business type",
                       items: _businessTypes
-                          .map((e) => (e['name'] ?? '').toString())
+                          .map((e) => (e['type_name'] ?? '').toString())
                           .where((x) => x.trim().isNotEmpty)
                           .toList(),
                       onChanged: (v) =>
@@ -210,7 +210,7 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
                       value: _selectedDistrict,
                       hint: "Select district",
                       items: _districts
-                          .map((e) => (e['name'] ?? '').toString())
+                          .map((e) => (e['district_name'] ?? '').toString())
                           .where((x) => x.trim().isNotEmpty)
                           .toList(),
                       onChanged: (v) => setState(() => _selectedDistrict = v),
