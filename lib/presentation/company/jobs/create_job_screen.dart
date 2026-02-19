@@ -163,6 +163,7 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
 
   // ------------------------------------------------------------
   // LOAD: COMPANIES WHERE I AM ACTIVE MEMBER
+  // (SAFE VERSION: NO RELATIONSHIP DEPENDENCY)
   // ------------------------------------------------------------
   Future<void> _loadCompanies() async {
     try {
@@ -178,30 +179,50 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
         return;
       }
 
-      final res = await _client
+      // 1) membership rows
+      final memRes = await _client
           .from("company_members")
-          .select("company_id, companies(id, name)")
+          .select("company_id,status")
           .eq("user_id", user.id)
           .eq("status", "active");
 
-      final list = List<Map<String, dynamic>>.from(res);
+      final memRows = List<Map<String, dynamic>>.from(memRes);
 
-      final companies = <Map<String, dynamic>>[];
+      final companyIds = memRows
+          .map((e) => (e["company_id"] ?? "").toString().trim())
+          .where((e) => e.isNotEmpty)
+          .toSet()
+          .toList();
 
-      for (final row in list) {
-        final c = row["companies"];
-        if (c == null) continue;
-
-        final id = (c["id"] ?? "").toString();
-        final name = (c["name"] ?? "").toString();
-
-        if (id.trim().isEmpty || name.trim().isEmpty) continue;
-
-        companies.add({
-          "id": id,
-          "name": name,
+      if (companyIds.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _myCompanies = [];
+          _selectedCompanyId = null;
+          _selectedCompanyName = null;
+          _loadingCompanies = false;
         });
+        return;
       }
+
+      // 2) fetch companies separately (no FK alias issues)
+      final compRes = await _client
+          .from("companies")
+          .select("id,name")
+          .inFilter("id", companyIds)
+          .order("name", ascending: true);
+
+      final compRows = List<Map<String, dynamic>>.from(compRes);
+
+      final companies = compRows
+          .map((c) => {
+                "id": (c["id"] ?? "").toString(),
+                "name": (c["name"] ?? "").toString(),
+              })
+          .where((c) =>
+              (c["id"] ?? "").toString().trim().isNotEmpty &&
+              (c["name"] ?? "").toString().trim().isNotEmpty)
+          .toList();
 
       companies.sort((a, b) => (a["name"] as String)
           .toLowerCase()
@@ -315,7 +336,6 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
     final descCtrl = TextEditingController();
 
     String? selectedBusinessTypeId;
-
     bool saving = false;
 
     await showModalBottomSheet(
@@ -455,17 +475,21 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
                           ? null
                           : () async {
                               final name = nameCtrl.text.trim();
-                              if (name.isEmpty) return;
+                              if (name.isEmpty) {
+                                _showError("Organization name required");
+                                return;
+                              }
 
                               if (selectedBusinessTypeId == null ||
                                   selectedBusinessTypeId!.trim().isEmpty) {
+                                _showError("Business type required");
                                 return;
                               }
 
                               setModalState(() => saving = true);
 
                               try {
-                                // 1) Create company
+                                // Create company (created_by is required in your DB)
                                 final inserted = await _client
                                     .from("companies")
                                     .insert({
@@ -494,7 +518,7 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
                                 final companyName =
                                     (inserted["name"] ?? "").toString();
 
-                                // 2) Add creator as active member
+                                // Add creator as active member
                                 await _client.from("company_members").insert({
                                   "company_id": companyId,
                                   "user_id": user.id,
@@ -506,18 +530,16 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
 
                                 Navigator.pop(ctx);
 
-                                // refresh list
                                 await _loadCompanies();
 
-                                // auto-select new company
                                 setState(() {
                                   _selectedCompanyId = companyId;
                                   _selectedCompanyName = companyName;
                                 });
 
                                 _showSuccess("Organization created");
-                              } catch (_) {
-                                _showError("Failed to create organization");
+                              } catch (e) {
+                                _showError("Failed to create organization: $e");
                               }
 
                               setModalState(() => saving = false);
@@ -620,37 +642,30 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
           .toList();
 
       await _client.from("job_listings").insert({
-        // REQUIRED (REAL)
         "employer_id": user.id,
         "company_id": _selectedCompanyId,
 
-        // REQUIRED (REAL)
         "job_title": _jobTitleCtrl.text.trim(),
         "job_category": _selectedCategory,
         "job_type": _jobType,
         "employment_type": _employmentType,
         "work_mode": _workMode,
 
-        // REQUIRED (REAL)
         "job_description": _jobDescriptionCtrl.text.trim(),
         "requirements": _requirementsCtrl.text.trim(),
         "education_required": _educationCtrl.text.trim(),
         "experience_required": _experienceCtrl.text.trim(),
 
-        // REQUIRED (REAL)
         "salary_min": salaryMin,
         "salary_max": salaryMax,
         "salary_period": _salaryPeriod,
         "salary_currency": "INR",
 
-        // REQUIRED (REAL)
         "district": _selectedDistrict,
         "job_address": _addressCtrl.text.trim(),
 
-        // REQUIRED (REAL)
         "hiring_urgency": _hiringUrgency,
 
-        // OPTIONAL
         "responsibilities": _responsibilitiesCtrl.text.trim().isEmpty
             ? null
             : _responsibilitiesCtrl.text.trim(),
@@ -666,14 +681,13 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
         "is_walk_in": _isWalkIn,
         "walk_in_details": _isWalkIn ? _walkInDetailsCtrl.text.trim() : null,
 
-        // must match enum
         "status": "active",
       });
 
       if (!mounted) return;
       Navigator.pop(context, true);
-    } catch (_) {
-      _showError("Failed to create job (check RLS + required fields)");
+    } catch (e) {
+      _showError("Failed to create job: $e");
     }
 
     if (!mounted) return;
@@ -693,18 +707,15 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
   // STEP VALIDATION
   // ------------------------------------------------------------
   bool _isStepValid(int step) {
-    // step 0: company
     if (step == 0) {
       return _selectedCompanyId != null && _selectedCompanyId!.trim().isNotEmpty;
     }
 
-    // step 1: job
     if (step == 1) {
       return _jobTitleCtrl.text.trim().isNotEmpty &&
           (_selectedCategory ?? '').trim().isNotEmpty;
     }
 
-    // step 2: requirements
     if (step == 2) {
       return _jobDescriptionCtrl.text.trim().isNotEmpty &&
           _requirementsCtrl.text.trim().isNotEmpty &&
@@ -714,7 +725,6 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
           _salaryMaxCtrl.text.trim().isNotEmpty;
     }
 
-    // step 3: location
     if (step == 3) {
       return (_selectedDistrict ?? '').trim().isNotEmpty &&
           _addressCtrl.text.trim().isNotEmpty;
@@ -1294,7 +1304,7 @@ class _CreateJobScreenState extends State<CreateJobScreen> {
   }
 
   // ------------------------------------------------------------
-  // DROPDOWNS (CATEGORIES + DISTRICTS)
+  // DROPDOWNS
   // ------------------------------------------------------------
   Widget _categoryDropdown() {
     if (_loadingCategories) {
