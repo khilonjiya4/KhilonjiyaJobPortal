@@ -55,6 +55,13 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
     );
   }
 
+  Map<String, dynamic> _asMap(dynamic v) {
+    if (v == null) return {};
+    if (v is Map<String, dynamic>) return v;
+    if (v is Map) return Map<String, dynamic>.from(v);
+    return {};
+  }
+
   // ------------------------------------------------------------
   // LOAD
   // ------------------------------------------------------------
@@ -63,9 +70,18 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
     setState(() => _loading = true);
 
     try {
-      // SECURITY: ensure current employer owns this job
-      final job = await _service.ensureJobOwnerAndGetJob(widget.jobId);
+      // FIXED: security rule is org membership, not employer_id
+      final job = await _service.ensureCanAccessJobAndGetJob(widget.jobId);
+
       _jobTitle = (job['job_title'] ?? '').toString();
+
+      final resolvedCompanyId = (job['company_id'] ?? '').toString().trim();
+
+      // safety: prevent pipeline open under wrong org
+      if (resolvedCompanyId.isNotEmpty &&
+          resolvedCompanyId != widget.companyId.trim()) {
+        throw Exception("Organization mismatch for this job.");
+      }
 
       // stages
       _stages = await _service.getCompanyPipelineStages(
@@ -176,7 +192,7 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
   // RESUME OPEN (REAL)
   // ------------------------------------------------------------
   Future<void> _openResume(Map<String, dynamic> row) async {
-    final app = (row['job_applications'] ?? {}) as Map;
+    final app = _asMap(row['job_applications']);
     final url = (app['resume_file_url'] ?? '').toString().trim();
 
     if (url.isEmpty) {
@@ -197,7 +213,7 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
   // OPEN APPLICANT DETAILS
   // ------------------------------------------------------------
   void _openApplicant(Map<String, dynamic> row) {
-    final app = (row['job_applications'] ?? {}) as Map;
+    final app = _asMap(row['job_applications']);
 
     final name = (app['name'] ?? 'Candidate').toString();
     final phone = (app['phone'] ?? '').toString();
@@ -259,8 +275,10 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
                   _kv("District", district.isEmpty ? "Not provided" : district),
                   _kv("Education", edu.isEmpty ? "Not provided" : edu),
                   _kv("Experience", exp.isEmpty ? "Not provided" : exp),
-                  _kv("Expected Salary",
-                      salary.isEmpty ? "Not provided" : salary),
+                  _kv(
+                    "Expected Salary",
+                    salary.isEmpty ? "Not provided" : salary,
+                  ),
                   const SizedBox(height: 12),
                   Text(
                     "Skills",
@@ -272,6 +290,29 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
                     style: KhilonjiyaUI.body.copyWith(
                       color: const Color(0xFF475569),
                       height: 1.45,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    "Employer Notes",
+                    style: KhilonjiyaUI.hTitle.copyWith(fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: _border),
+                    ),
+                    child: Text(
+                      notes.trim().isEmpty ? "No notes yet." : notes,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: _text,
+                        height: 1.35,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -619,7 +660,7 @@ class _JobApplicantsPipelinePageState extends State<JobApplicantsPipelinePage> {
   }
 
   Widget _applicantCard(Map<String, dynamic> row, String currentStageId) {
-    final app = (row['job_applications'] ?? {}) as Map;
+    final app = _asMap(row['job_applications']);
 
     final name = (app['name'] ?? 'Candidate').toString();
     final district = (app['district'] ?? '').toString();
