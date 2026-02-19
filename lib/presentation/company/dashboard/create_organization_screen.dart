@@ -1,7 +1,7 @@
+// lib/presentation/company/dashboard/create_organization_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../../routes/app_routes.dart';
 import '../../../services/employer_dashboard_service.dart';
 
 class CreateOrganizationScreen extends StatefulWidget {
@@ -132,12 +132,8 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
       if (!mounted) return;
 
       // IMPORTANT:
-      // After org created, go to dashboard using routes (not MaterialPageRoute).
-      await Navigator.pushNamedAndRemoveUntil(
-        context,
-        AppRoutes.companyDashboard,
-        (_) => false,
-      );
+      // Return to dashboard and let it reload.
+      Navigator.pop(context, true);
 
       _toast("Organization created");
     } catch (e) {
@@ -282,7 +278,7 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
   }
 
   // ------------------------------------------------------------
-  // UI HELPERS (Slim + Keyboard Safe)
+  // UI HELPERS
   // ------------------------------------------------------------
   Widget _title(String t) {
     return Text(
