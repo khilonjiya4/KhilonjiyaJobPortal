@@ -1,3 +1,4 @@
+// lib/presentation/company/dashboard/company_dashboard.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -29,6 +30,12 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
 
   int _unreadNotifications = 0;
 
+  // Multi-org
+  String _companyId = "";
+
+  // If user has no org
+  bool _needsOrganization = false;
+
   // Bottom nav
   int _bottomIndex = 0;
 
@@ -57,6 +64,9 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     return u;
   }
 
+  // ------------------------------------------------------------
+  // LOAD DASHBOARD (ORG BASED)
+  // ------------------------------------------------------------
   Future<void> _loadDashboard({bool silent = false}) async {
     if (!mounted) return;
 
@@ -64,19 +74,23 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     if (silent) setState(() => _refreshing = true);
 
     try {
-      final user = _requireUser();
+      _requireUser();
 
-      // Resolve company first (needed for interviews)
-      final company = await _service.resolveMyCompany();
-      final companyId = (company['id'] ?? '').toString();
+      // 1) Resolve default organization
+      final companyId = await _service.resolveDefaultCompanyId();
+      _companyId = companyId;
 
+      // 2) Fetch organization object
+      final company = await _service.fetchCompanyById(companyId: companyId);
+
+      // 3) Fetch everything else using companyId
       final results = await Future.wait([
-        _service.fetchEmployerJobs(),
-        _service.fetchEmployerDashboardStats(),
-        _service.fetchRecentApplicants(limit: 6),
-        _service.fetchTopJobs(limit: 6),
+        _service.fetchCompanyJobs(companyId: companyId),
+        _service.fetchCompanyDashboardStats(companyId: companyId),
+        _service.fetchRecentApplicants(companyId: companyId, limit: 6),
+        _service.fetchTopJobs(companyId: companyId, limit: 6),
         _service.fetchTodayInterviews(companyId: companyId, limit: 10),
-        _service.fetchLast7DaysPerformance(employerId: user.id),
+        _service.fetchLast7DaysPerformance(companyId: companyId),
         _service.fetchUnreadNotificationsCount(),
       ]);
 
@@ -88,7 +102,18 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
       _todayInterviews = List<Map<String, dynamic>>.from(results[4] as List);
       _perf7d = Map<String, dynamic>.from(results[5] as Map);
       _unreadNotifications = (results[6] as int);
-    } catch (_) {
+
+      _needsOrganization = false;
+    } catch (e) {
+      // If no org exists
+      final msg = e.toString().toLowerCase();
+      final noOrg = msg.contains("no organization linked") ||
+          msg.contains("create one first") ||
+          msg.contains("no organization") ||
+          msg.contains("no company");
+
+      _needsOrganization = noOrg;
+
       _company = {};
       _jobs = [];
       _stats = {};
@@ -97,6 +122,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
       _todayInterviews = [];
       _perf7d = {};
       _unreadNotifications = 0;
+      _companyId = "";
     }
 
     if (!mounted) return;
@@ -136,13 +162,13 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   int get _applicants24h => _s('applicants_last_24h');
 
   // ------------------------------------------------------------
-  // COMPANY SAFE
+  // ORG SAFE
   // ------------------------------------------------------------
-  String get _companyName => (_company['name'] ?? 'Company').toString();
-  String get _companyLogo => (_company['logo_url'] ?? '').toString();
-  bool get _companyVerified => (_company['is_verified'] ?? false) == true;
+  String get _orgName => (_company['name'] ?? 'Organization').toString();
+  String get _orgLogo => (_company['logo_url'] ?? '').toString();
+  bool get _orgVerified => (_company['is_verified'] ?? false) == true;
 
-  String get _companyLocation {
+  String get _orgLocation {
     final city = (_company['headquarters_city'] ?? '').toString().trim();
     final state = (_company['headquarters_state'] ?? '').toString().trim();
 
@@ -152,6 +178,9 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     return "India";
   }
 
+  // ------------------------------------------------------------
+  // BUILD
+  // ------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -169,6 +198,15 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
               const Expanded(
                 child: Center(child: CircularProgressIndicator()),
               )
+            else if (_needsOrganization)
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 120),
+                  children: [
+                    _noOrgCard(),
+                  ],
+                ),
+              )
             else
               Expanded(
                 child: RefreshIndicator(
@@ -176,7 +214,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
                     children: [
-                      _buildCompanyProfileRow(),
+                      _buildOrganizationProfileRow(),
                       const SizedBox(height: 14),
 
                       _sectionHeader(
@@ -249,21 +287,86 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          final res = await Navigator.pushNamed(context, AppRoutes.createJob);
-          if (res == true) await _loadDashboard(silent: true);
-        },
-        backgroundColor: _primary,
-        foregroundColor: Colors.white,
-        elevation: 1,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text(
-          "Post a Job",
-          style: TextStyle(fontWeight: FontWeight.w800),
-        ),
-      ),
+      floatingActionButton: _needsOrganization
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () async {
+                final res = await Navigator.pushNamed(context, AppRoutes.createJob);
+                if (res == true) await _loadDashboard(silent: true);
+              },
+              backgroundColor: _primary,
+              foregroundColor: Colors.white,
+              elevation: 1,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text(
+                "Post a Job",
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
       bottomNavigationBar: _buildBottomNav(),
+    );
+  }
+
+  // ------------------------------------------------------------
+  // NO ORG CARD
+  // ------------------------------------------------------------
+  Widget _noOrgCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: _cardDeco(radius: _r20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "Create your Organization",
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+              color: _text,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            "You must create an organization before you can post jobs and manage applicants.",
+            style: TextStyle(
+              fontSize: 12.8,
+              fontWeight: FontWeight.w800,
+              color: _muted,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () async {
+                final res = await Navigator.pushNamed(
+                  context,
+                  AppRoutes.createOrganization,
+                );
+
+                if (res == true) {
+                  await _loadDashboard(silent: false);
+                }
+              },
+              icon: const Icon(Icons.apartment_rounded),
+              label: const Text(
+                "Create Organization",
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _primary,
+                backgroundColor: const Color(0xFFEFF6FF),
+                side: const BorderSide(color: Color(0xFFBFDBFE)),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -357,15 +460,15 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // COMPANY PROFILE ROW (REAL)
+  // ORGANIZATION PROFILE ROW (REAL)
   // ------------------------------------------------------------
-  Widget _buildCompanyProfileRow() {
+  Widget _buildOrganizationProfileRow() {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: _cardDeco(radius: _r20),
       child: Row(
         children: [
-          _companyAvatar(),
+          _orgAvatar(),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -375,7 +478,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                   children: [
                     Expanded(
                       child: Text(
-                        _companyName,
+                        _orgName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -387,7 +490,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    if (_companyVerified)
+                    if (_orgVerified)
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 10,
@@ -425,7 +528,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        _companyLocation,
+                        _orgLocation,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -445,8 +548,8 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     );
   }
 
-  Widget _companyAvatar() {
-    if (_companyLogo.trim().isNotEmpty) {
+  Widget _orgAvatar() {
+    if (_orgLogo.trim().isNotEmpty) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(999),
         child: Container(
@@ -458,7 +561,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
             color: const Color(0xFFEFF6FF),
           ),
           child: Image.network(
-            _companyLogo,
+            _orgLogo,
             fit: BoxFit.cover,
             errorBuilder: (_, __, ___) => const Icon(
               Icons.apartment_rounded,
@@ -626,7 +729,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // PRIMARY ACTIONS (REAL NAV)
+  // PRIMARY ACTIONS
   // ------------------------------------------------------------
   Widget _buildPrimaryActionsGrid() {
     return GridView.count(
@@ -770,7 +873,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
     final listing = (row['job_listings'] ?? {}) as Map;
     final app = (row['job_applications'] ?? {}) as Map;
 
-    final listingId = (row['listing_id'] ?? '').toString();
+    final jobId = (listing['id'] ?? '').toString();
     final status = (row['application_status'] ?? 'applied').toString();
     final appliedAt = row['applied_at'];
 
@@ -783,7 +886,10 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
         await Navigator.pushNamed(
           context,
           AppRoutes.jobApplicants,
-          arguments: listingId,
+          arguments: {
+            'jobId': jobId,
+            'companyId': _companyId,
+          },
         );
         await _loadDashboard(silent: true);
       },
@@ -1057,14 +1163,17 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          "Edit Job will be added after Applicants Pipeline",
-                        ),
-                      ),
+                  onPressed: () async {
+                    final res = await Navigator.pushNamed(
+                      context,
+                      AppRoutes.createJob,
+                      arguments: {
+                        'mode': 'edit',
+                        'jobId': jobId,
+                      },
                     );
+
+                    if (res == true) await _loadDashboard(silent: true);
                   },
                   icon: const Icon(Icons.edit_outlined, size: 18),
                   label: const Text(
@@ -1089,7 +1198,10 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                     await Navigator.pushNamed(
                       context,
                       AppRoutes.jobApplicants,
-                      arguments: jobId,
+                      arguments: {
+                        'jobId': jobId,
+                        'companyId': _companyId,
+                      },
                     );
                     await _loadDashboard(silent: true);
                   },
@@ -1190,7 +1302,8 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   Widget _interviewTile(Map<String, dynamic> row) {
-    final scheduledAt = DateTime.tryParse((row['scheduled_at'] ?? '').toString());
+    final scheduledAt =
+        DateTime.tryParse((row['scheduled_at'] ?? '').toString());
     final type = (row['interview_type'] ?? 'video').toString().toLowerCase();
     final duration = _toInt(row['duration_minutes']);
     final meetingLink = (row['meeting_link'] ?? '').toString();
@@ -1323,20 +1436,21 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
       return _softEmptyCard(
         icon: Icons.insights_outlined,
         title: "No data yet",
-        subtitle: "Views and applications will appear after your jobs get traffic.",
+        subtitle:
+            "Views and applications will appear after your jobs get traffic.",
       );
     }
 
     int totalViews = _toInt(_perf7d['total_views']);
     int totalApps = _toInt(_perf7d['total_applications']);
 
-    // simple bars
     int maxV = 1;
     int maxA = 1;
+
     for (final d in days) {
       if (d is! Map) continue;
-      maxV = (d['views'] as int) > maxV ? (d['views'] as int) : maxV;
-      maxA = (d['applications'] as int) > maxA ? (d['applications'] as int) : maxA;
+      maxV = _toInt(d['views']) > maxV ? _toInt(d['views']) : maxV;
+      maxA = _toInt(d['applications']) > maxA ? _toInt(d['applications']) : maxA;
     }
 
     return Container(
@@ -1364,8 +1478,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                 ),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
                   color: const Color(0xFFF8FAFC),
                   borderRadius: BorderRadius.circular(999),
@@ -1536,7 +1649,14 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
 
     return InkWell(
       onTap: () async {
-        await Navigator.pushNamed(context, AppRoutes.jobApplicants, arguments: id);
+        await Navigator.pushNamed(
+          context,
+          AppRoutes.jobApplicants,
+          arguments: {
+            'jobId': id,
+            'companyId': _companyId,
+          },
+        );
         await _loadDashboard(silent: true);
       },
       borderRadius: BorderRadius.circular(16),
@@ -1725,7 +1845,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // DRAWER (REAL NAV)
+  // DRAWER
   // ------------------------------------------------------------
   Widget _newEmployerDrawer() {
     return Drawer(
@@ -1742,14 +1862,14 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
               ),
               child: Row(
                 children: [
-                  _companyAvatar(),
+                  _orgAvatar(),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _companyName,
+                          _needsOrganization ? "No Organization" : _orgName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -1784,6 +1904,18 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                     onTap: () => Navigator.pop(context),
                   ),
                   _drawerItem(
+                    icon: Icons.apartment_outlined,
+                    title: "Create Organization",
+                    onTap: () async {
+                      Navigator.pop(context);
+                      final res = await Navigator.pushNamed(
+                        context,
+                        AppRoutes.createOrganization,
+                      );
+                      if (res == true) await _loadDashboard(silent: false);
+                    },
+                  ),
+                  _drawerItem(
                     icon: Icons.work_outline,
                     title: "My Jobs",
                     onTap: () {
@@ -1794,14 +1926,25 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
                   _drawerItem(
                     icon: Icons.add_circle_outline,
                     title: "Post a Job",
-                    onTap: () async {
-                      Navigator.pop(context);
-                      final res = await Navigator.pushNamed(
-                        context,
-                        AppRoutes.createJob,
-                      );
-                      if (res == true) await _loadDashboard(silent: true);
-                    },
+                    onTap: _needsOrganization
+                        ? () {
+                            Navigator.pop(context);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  "Create an organization first.",
+                                ),
+                              ),
+                            );
+                          }
+                        : () async {
+                            Navigator.pop(context);
+                            final res = await Navigator.pushNamed(
+                              context,
+                              AppRoutes.createJob,
+                            );
+                            if (res == true) await _loadDashboard(silent: true);
+                          },
                   ),
                   _drawerItem(
                     icon: Icons.people_outline,
@@ -1908,7 +2051,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
   }
 
   // ------------------------------------------------------------
-  // BOTTOM NAV (REAL FOR FIRST 3, MESSAGES MOCK)
+  // BOTTOM NAV
   // ------------------------------------------------------------
   Widget _buildBottomNav() {
     return Container(
@@ -1922,7 +2065,7 @@ class _CompanyDashboardState extends State<CompanyDashboard> {
           setState(() => _bottomIndex = i);
 
           if (i == 0) {
-            // dashboard (stay)
+            // dashboard
           } else if (i == 1) {
             Navigator.pushNamed(context, AppRoutes.employerJobs);
           } else if (i == 2) {
