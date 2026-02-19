@@ -77,7 +77,8 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
     setState(() => _loading = true);
 
     try {
-      final job = await _service.ensureJobOwnerAndGetJob(widget.jobId);
+      // FIXED: new access rule is organization membership, not employer_id
+      final job = await _service.ensureCanAccessJobAndGetJob(widget.jobId);
 
       _resolvedCompanyId = (job['company_id'] ?? '').toString().trim();
       _jobTitle = (job['job_title'] ?? '').toString().trim();
@@ -416,7 +417,6 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                     ),
                   ),
                   const SizedBox(height: 14),
-
                   Row(
                     children: [
                       Expanded(
@@ -470,9 +470,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                       ),
                     ],
                   ),
-
                   const SizedBox(height: 10),
-
                   Row(
                     children: [
                       Expanded(
@@ -526,9 +524,7 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                       ),
                     ],
                   ),
-
                   const SizedBox(height: 10),
-
                   Row(
                     children: [
                       Expanded(
@@ -582,7 +578,6 @@ class _JobApplicantsScreenState extends State<JobApplicantsScreen> {
                       ),
                     ],
                   ),
-
                   const SizedBox(height: 16),
                 ],
               ),
