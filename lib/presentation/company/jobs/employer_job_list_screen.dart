@@ -169,7 +169,7 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
   }
 
   // ------------------------------------------------------------
-  // NAV (FIXED: USE job.company_id, NOT resolveMyCompanyId)
+  // NAV (USE job.company_id)
   // ------------------------------------------------------------
   Future<void> _openApplicants({
     required String jobId,
@@ -450,11 +450,11 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: _border),
       ),
-      child: const Column(
+      child: Column(
         children: [
-          Icon(Icons.work_outline, size: 40, color: _muted),
-          SizedBox(height: 10),
-          Text(
+          const Icon(Icons.work_outline, size: 40, color: _muted),
+          const SizedBox(height: 10),
+          const Text(
             "No jobs found",
             style: TextStyle(
               fontWeight: FontWeight.w900,
@@ -462,8 +462,8 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
               color: _text,
             ),
           ),
-          SizedBox(height: 6),
-          Text(
+          const SizedBox(height: 6),
+          const Text(
             "Try changing filters or post a new job.",
             textAlign: TextAlign.center,
             style: TextStyle(
@@ -960,4 +960,6 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
     if (d == null) return '';
     return "${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}";
   }
-}
+} // closes _EmployerJobListScreenState
+
+} // closes EmployerJobListScreen
