@@ -23,7 +23,6 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
   final TextEditingController _searchController = TextEditingController();
 
   List<Map<String, dynamic>> _jobs = [];
-  String _companyId = '';
 
   // UI tokens
   static const Color _bg = Color(0xFFF7F8FA);
@@ -51,8 +50,6 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
     if (silent) setState(() => _refreshing = true);
 
     try {
-      _companyId = await _service.resolveMyCompanyId();
-
       final res = await _service.fetchEmployerJobs(
         search: _search,
         status: _status,
@@ -61,7 +58,6 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
       _jobs = List<Map<String, dynamic>>.from(res);
     } catch (e) {
       _jobs = [];
-      _companyId = '';
       _toast("Failed: ${e.toString()}");
     }
 
@@ -81,7 +77,7 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
   }
 
   // ------------------------------------------------------------
-  // STATUS ACTIONS (REAL)
+  // STATUS ACTIONS
   // ------------------------------------------------------------
   Future<void> _changeStatus({
     required String jobId,
@@ -131,7 +127,7 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
   }
 
   // ------------------------------------------------------------
-  // DELETE JOB (REAL)
+  // DELETE JOB
   // ------------------------------------------------------------
   Future<void> _deleteJob(String jobId) async {
     final ok = await showDialog<bool>(
@@ -173,11 +169,14 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
   }
 
   // ------------------------------------------------------------
-  // NAV (FIXED)
+  // NAV (FIXED: USE job.company_id, NOT resolveMyCompanyId)
   // ------------------------------------------------------------
-  Future<void> _openApplicants(String jobId) async {
-    if (_companyId.trim().isEmpty) {
-      _toast("Company not linked. Please contact support.");
+  Future<void> _openApplicants({
+    required String jobId,
+    required String companyId,
+  }) async {
+    if (companyId.trim().isEmpty) {
+      _toast("Organization missing for this job.");
       return;
     }
 
@@ -186,16 +185,19 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
       AppRoutes.jobApplicants,
       arguments: {
         'jobId': jobId,
-        'companyId': _companyId,
+        'companyId': companyId,
       },
     );
 
     await _load(silent: true);
   }
 
-  Future<void> _openPipeline(String jobId) async {
-    if (_companyId.trim().isEmpty) {
-      _toast("Company not linked. Please contact support.");
+  Future<void> _openPipeline({
+    required String jobId,
+    required String companyId,
+  }) async {
+    if (companyId.trim().isEmpty) {
+      _toast("Organization missing for this job.");
       return;
     }
 
@@ -204,7 +206,7 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
       AppRoutes.jobApplicantsPipeline,
       arguments: {
         'jobId': jobId,
-        'companyId': _companyId,
+        'companyId': companyId,
       },
     );
 
@@ -480,6 +482,8 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
   // ------------------------------------------------------------
   Widget _jobCard(Map<String, dynamic> j) {
     final jobId = (j['id'] ?? '').toString();
+    final companyId = (j['company_id'] ?? '').toString();
+
     final title = (j['job_title'] ?? 'Job').toString();
     final district = (j['district'] ?? '').toString();
     final jobType = (j['job_type'] ?? 'Full-time').toString();
@@ -658,7 +662,10 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () => _openApplicants(jobId),
+                  onPressed: () => _openApplicants(
+                    jobId: jobId,
+                    companyId: companyId,
+                  ),
                   icon: const Icon(Icons.people_outline, size: 18),
                   label: const Text(
                     "Applicants",
@@ -678,7 +685,10 @@ class _EmployerJobListScreenState extends State<EmployerJobListScreen> {
               const SizedBox(width: 10),
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () => _openPipeline(jobId),
+                  onPressed: () => _openPipeline(
+                    jobId: jobId,
+                    companyId: companyId,
+                  ),
                   icon: const Icon(Icons.view_kanban_outlined, size: 18),
                   label: const Text(
                     "Pipeline",
