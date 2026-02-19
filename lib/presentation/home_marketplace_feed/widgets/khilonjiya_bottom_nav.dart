@@ -14,16 +14,8 @@ class KhilonjiyaBottomNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(top: BorderSide(color: AppTheme.border)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 18,
-            offset: const Offset(0, -6),
-          ),
-        ],
       ),
       child: SafeArea(
         top: false,
@@ -33,11 +25,20 @@ class KhilonjiyaBottomNav extends StatelessWidget {
           type: BottomNavigationBarType.fixed,
           elevation: 0,
           backgroundColor: Colors.white,
-          selectedItemColor: AppTheme.blue,
-          unselectedItemColor: AppTheme.subText,
-          selectedFontSize: 11.2,
-          unselectedFontSize: 11.2,
+          selectedItemColor: Color(0xFF2563EB),
+          unselectedItemColor: Color(0xFF94A3B8),
+          selectedFontSize: 11,
+          unselectedFontSize: 11,
+          iconSize: 22,
           showUnselectedLabels: true,
+          selectedLabelStyle: const TextStyle(
+            fontWeight: FontWeight.w500,
+            height: 1.1,
+          ),
+          unselectedLabelStyle: const TextStyle(
+            fontWeight: FontWeight.w400,
+            height: 1.1,
+          ),
           items: const [
             BottomNavigationBarItem(
               icon: Icon(Icons.home_outlined),
@@ -49,14 +50,11 @@ class KhilonjiyaBottomNav extends StatelessWidget {
               activeIcon: Icon(Icons.work_rounded),
               label: "My Jobs",
             ),
-
-            // ✅ Subscription (replaced Messages)
             BottomNavigationBarItem(
               icon: Icon(Icons.workspace_premium_outlined),
               activeIcon: Icon(Icons.workspace_premium_rounded),
               label: "Subscription",
             ),
-
             BottomNavigationBarItem(
               icon: Icon(Icons.bookmark_outline_rounded),
               activeIcon: Icon(Icons.bookmark_rounded),
