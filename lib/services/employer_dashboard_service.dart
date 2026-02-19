@@ -206,12 +206,12 @@ class EmployerDashboardService {
     if (companyId.isEmpty) throw Exception("Failed to create organization");
 
     // 2) make current employer an active member
-    await _db.from('company_members').insert({
+    await _db.from('company_members').upsert({
   'company_id': companyId,
   'user_id': user.id,
-  'role': 'admin_or_whatever',
+  'role': 'owner', // put the correct enum value you have
   'status': 'active',
-});
+}, onConflict: 'company_id,user_id');
     return companyId;
   }
 
