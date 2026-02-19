@@ -14,54 +14,90 @@ class EmployerDashboardService {
   }
 
   // ------------------------------------------------------------
-  // COMPANY RESOLUTION (owner_id OR company_members)
+  // COMPANIES (MULTI COMPANY SUPPORT)
   // ------------------------------------------------------------
-  Future<Map<String, dynamic>> resolveMyCompany() async {
+
+  /// Returns companies where current user is an active member.
+  /// This is the ONLY source of truth for employer -> company relationship.
+  Future<List<Map<String, dynamic>>> fetchMyCompanies() async {
     final user = _requireUser();
 
-    // 1) Try owner_id
-    final owned = await _db
-        .from('companies')
-        .select('''
-          id,
-          name,
-          logo_url,
-          is_verified,
-          headquarters_city,
-          headquarters_state,
-          industry,
-          company_size,
-          website,
-          description,
-          rating,
-          total_reviews,
-          created_at
-        ''')
-        .eq('owner_id', user.id)
-        .maybeSingle();
-
-    if (owned != null) {
-      return Map<String, dynamic>.from(owned);
-    }
-
-    // 2) Try company_members
-    final member = await _db
+    final res = await _db
         .from('company_members')
-        .select('company_id, role, status')
+        .select('''
+          company_id,
+          role,
+          status,
+          joined_at,
+          companies (
+            id,
+            name,
+            logo_url,
+            is_verified,
+            headquarters_city,
+            headquarters_state,
+            industry,
+            company_size,
+            website,
+            description,
+            rating,
+            total_reviews,
+            created_at
+          )
+        ''')
         .eq('user_id', user.id)
         .eq('status', 'active')
-        .maybeSingle();
+        .order('joined_at', ascending: false);
 
-    if (member == null) {
-      throw Exception(
-        "No company linked to this employer account. Please contact support.",
-      );
+    final rows = List<Map<String, dynamic>>.from(res);
+
+    final List<Map<String, dynamic>> companies = [];
+
+    for (final r in rows) {
+      final c = r['companies'];
+      if (c == null || c is! Map) continue;
+
+      final id = (c['id'] ?? '').toString();
+      final name = (c['name'] ?? '').toString();
+
+      if (id.trim().isEmpty || name.trim().isEmpty) continue;
+
+      companies.add({
+        ...Map<String, dynamic>.from(c as Map),
+        'my_role': (r['role'] ?? 'recruiter').toString(),
+        'my_status': (r['status'] ?? 'active').toString(),
+        'my_joined_at': r['joined_at'],
+      });
     }
 
-    final companyId = (member['company_id'] ?? '').toString();
-    if (companyId.trim().isEmpty) {
-      throw Exception("Company link is invalid. Please contact support.");
+    // Sort by company name for stable UI
+    companies.sort((a, b) {
+      final an = (a['name'] ?? '').toString().toLowerCase();
+      final bn = (b['name'] ?? '').toString().toLowerCase();
+      return an.compareTo(bn);
+    });
+
+    return companies;
+  }
+
+  /// Picks a default company for dashboard if user has multiple.
+  /// For now: first alphabetical (stable).
+  Future<String> resolveDefaultCompanyId() async {
+    final companies = await fetchMyCompanies();
+    if (companies.isEmpty) {
+      throw Exception("No organization linked. Please create one first.");
     }
+    return (companies.first['id'] ?? '').toString();
+  }
+
+  /// Loads full company object by ID (must be accessible by RLS)
+  Future<Map<String, dynamic>> fetchCompanyById({
+    required String companyId,
+  }) async {
+    _requireUser();
+
+    final id = companyId.trim();
+    if (id.isEmpty) throw Exception("Company ID missing");
 
     final company = await _db
         .from('companies')
@@ -80,21 +116,26 @@ class EmployerDashboardService {
           total_reviews,
           created_at
         ''')
-        .eq('id', companyId)
+        .eq('id', id)
         .maybeSingle();
 
     if (company == null) {
-      throw Exception("Company not found. Please contact support.");
+      throw Exception("Organization not found or access denied.");
     }
 
     return Map<String, dynamic>.from(company);
   }
 
   // ------------------------------------------------------------
-  // JOBS (WITH APPLICATION COUNTS)
+  // JOBS (COMPANY BASED, NOT EMPLOYER BASED)
   // ------------------------------------------------------------
-  Future<List<Map<String, dynamic>>> fetchEmployerJobs() async {
-    final user = _requireUser();
+  Future<List<Map<String, dynamic>>> fetchCompanyJobs({
+    required String companyId,
+  }) async {
+    _requireUser();
+
+    final id = companyId.trim();
+    if (id.isEmpty) throw Exception("Company ID missing");
 
     final jobs = await _db
         .from('job_listings')
@@ -105,6 +146,7 @@ class EmployerDashboardService {
           job_title,
           district,
           job_type,
+          employment_type,
           salary_min,
           salary_max,
           salary_period,
@@ -113,14 +155,15 @@ class EmployerDashboardService {
           created_at,
           expires_at
         ''')
-        .eq('employer_id', user.id)
+        .eq('company_id', id)
         .order('created_at', ascending: false);
 
     final jobList = List<Map<String, dynamic>>.from(jobs);
     if (jobList.isEmpty) return [];
 
-    final jobIds = jobList.map((e) => e['id'].toString()).toList();
+    final jobIds = jobList.map((e) => (e['id'] ?? '').toString()).toList();
 
+    // Application counts
     final appsRes = await _db
         .from('job_applications_listings')
         .select('listing_id')
@@ -136,25 +179,30 @@ class EmployerDashboardService {
     }
 
     return jobList.map((j) {
-      final id = (j['id'] ?? '').toString();
+      final jid = (j['id'] ?? '').toString();
       return {
         ...j,
-        'applications_count': countMap[id] ?? 0,
+        'applications_count': countMap[jid] ?? 0,
       };
     }).toList();
   }
 
   // ------------------------------------------------------------
-  // DASHBOARD STATS
+  // DASHBOARD STATS (COMPANY BASED)
   // ------------------------------------------------------------
-  Future<Map<String, dynamic>> fetchEmployerDashboardStats() async {
-    final user = _requireUser();
+  Future<Map<String, dynamic>> fetchCompanyDashboardStats({
+    required String companyId,
+  }) async {
+    _requireUser();
 
-    // Optional RPC if exists
+    final id = companyId.trim();
+    if (id.isEmpty) throw Exception("Company ID missing");
+
+    // Optional RPC (if you create later)
     try {
       final rpcRes = await _db.rpc(
-        'rpc_employer_dashboard_stats',
-        params: {'p_employer_id': user.id},
+        'rpc_company_dashboard_stats',
+        params: {'p_company_id': id},
       );
 
       if (rpcRes != null && rpcRes is Map) {
@@ -178,10 +226,10 @@ class EmployerDashboardService {
     final jobsRes = await _db
         .from('job_listings')
         .select('id,status,views_count,created_at')
-        .eq('employer_id', user.id);
+        .eq('company_id', id);
 
     final jobs = List<Map<String, dynamic>>.from(jobsRes);
-    final jobIds = jobs.map((e) => e['id'].toString()).toList();
+    final jobIds = jobs.map((e) => (e['id'] ?? '').toString()).toList();
 
     int totalViews = 0;
     int active = 0;
@@ -233,20 +281,24 @@ class EmployerDashboardService {
   }
 
   // ------------------------------------------------------------
-  // RECENT APPLICANTS
+  // RECENT APPLICANTS (COMPANY BASED)
   // ------------------------------------------------------------
   Future<List<Map<String, dynamic>>> fetchRecentApplicants({
+    required String companyId,
     int limit = 6,
   }) async {
-    final user = _requireUser();
+    _requireUser();
+
+    final id = companyId.trim();
+    if (id.isEmpty) throw Exception("Company ID missing");
 
     final jobsRes = await _db
         .from('job_listings')
         .select('id')
-        .eq('employer_id', user.id);
+        .eq('company_id', id);
 
     final jobs = List<Map<String, dynamic>>.from(jobsRes);
-    final jobIds = jobs.map((e) => e['id'].toString()).toList();
+    final jobIds = jobs.map((e) => (e['id'] ?? '').toString()).toList();
     if (jobIds.isEmpty) return [];
 
     final res = await _db
@@ -286,12 +338,16 @@ class EmployerDashboardService {
   }
 
   // ------------------------------------------------------------
-  // TOP JOBS (BY APPLICATION COUNT)
+  // TOP JOBS (COMPANY BASED)
   // ------------------------------------------------------------
   Future<List<Map<String, dynamic>>> fetchTopJobs({
+    required String companyId,
     int limit = 6,
   }) async {
-    final user = _requireUser();
+    _requireUser();
+
+    final id = companyId.trim();
+    if (id.isEmpty) throw Exception("Company ID missing");
 
     final jobsRes = await _db
         .from('job_listings')
@@ -302,12 +358,12 @@ class EmployerDashboardService {
           views_count,
           created_at
         ''')
-        .eq('employer_id', user.id);
+        .eq('company_id', id);
 
     final jobs = List<Map<String, dynamic>>.from(jobsRes);
     if (jobs.isEmpty) return [];
 
-    final jobIds = jobs.map((e) => e['id'].toString()).toList();
+    final jobIds = jobs.map((e) => (e['id'] ?? '').toString()).toList();
 
     final appsRes = await _db
         .from('job_applications_listings')
@@ -318,16 +374,16 @@ class EmployerDashboardService {
 
     final Map<String, int> countMap = {};
     for (final a in apps) {
-      final id = (a['listing_id'] ?? '').toString();
-      if (id.isEmpty) continue;
-      countMap[id] = (countMap[id] ?? 0) + 1;
+      final jid = (a['listing_id'] ?? '').toString();
+      if (jid.isEmpty) continue;
+      countMap[jid] = (countMap[jid] ?? 0) + 1;
     }
 
     final enriched = jobs.map((j) {
-      final id = (j['id'] ?? '').toString();
+      final jid = (j['id'] ?? '').toString();
       return {
         ...j,
-        'applications_count': countMap[id] ?? 0,
+        'applications_count': countMap[jid] ?? 0,
       };
     }).toList();
 
@@ -341,13 +397,16 @@ class EmployerDashboardService {
   }
 
   // ------------------------------------------------------------
-  // TODAY'S INTERVIEWS (REAL)
+  // TODAY'S INTERVIEWS (COMPANY BASED)
   // ------------------------------------------------------------
   Future<List<Map<String, dynamic>>> fetchTodayInterviews({
     required String companyId,
     int limit = 10,
   }) async {
     _requireUser();
+
+    final id = companyId.trim();
+    if (id.isEmpty) throw Exception("Company ID missing");
 
     final now = DateTime.now();
     final start = DateTime(now.year, now.month, now.day, 0, 0, 0);
@@ -387,7 +446,7 @@ class EmployerDashboardService {
             )
           )
         ''')
-        .eq('company_id', companyId)
+        .eq('company_id', id)
         .gte('scheduled_at', start.toIso8601String())
         .lte('scheduled_at', end.toIso8601String())
         .order('scheduled_at', ascending: true)
@@ -397,25 +456,28 @@ class EmployerDashboardService {
   }
 
   // ------------------------------------------------------------
-  // LAST 7 DAYS PERFORMANCE (REAL)
+  // LAST 7 DAYS PERFORMANCE (COMPANY BASED)
   // ------------------------------------------------------------
   Future<Map<String, dynamic>> fetchLast7DaysPerformance({
-    required String employerId,
+    required String companyId,
   }) async {
     _requireUser();
+
+    final id = companyId.trim();
+    if (id.isEmpty) throw Exception("Company ID missing");
 
     final now = DateTime.now();
     final start = now.subtract(const Duration(days: 6));
     final startDate = DateTime(start.year, start.month, start.day, 0, 0, 0);
 
-    // load employer job ids
+    // load company job ids
     final jobsRes = await _db
         .from('job_listings')
         .select('id')
-        .eq('employer_id', employerId);
+        .eq('company_id', id);
 
     final jobs = List<Map<String, dynamic>>.from(jobsRes);
-    final jobIds = jobs.map((e) => e['id'].toString()).toList();
+    final jobIds = jobs.map((e) => (e['id'] ?? '').toString()).toList();
 
     // build days map
     final List<Map<String, dynamic>> days = [];
@@ -457,7 +519,6 @@ class EmployerDashboardService {
     int totalViews = 0;
     int totalApps = 0;
 
-    // helper for bucket
     int dayIndex(DateTime d) {
       final base = DateTime(startDate.year, startDate.month, startDate.day);
       final dd = DateTime(d.year, d.month, d.day);
