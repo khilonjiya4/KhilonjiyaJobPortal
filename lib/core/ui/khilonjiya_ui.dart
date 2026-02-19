@@ -1,99 +1,120 @@
 import 'package:flutter/material.dart';
 
 class KhilonjiyaUI {
-  // Colors (Figma)
-  static const Color bg = Color(0xFFF7F8FA);
+  // ============================================================
+  // COLORS (NAUKRI STYLE – SOFT & LIGHT)
+  // ============================================================
+
+  static const Color bg = Color(0xFFF8FAFC);          // lighter background
   static const Color card = Colors.white;
-  static const Color border = Color(0xFFE6E8EC);
+  static const Color border = Color(0xFFF1F5F9);      // softer border
   static const Color text = Color(0xFF111827);
-  static const Color muted = Color(0xFF6B7280);
+  static const Color muted = Color(0xFF64748B);
+  static const Color lightMuted = Color(0xFF94A3B8);
   static const Color primary = Color(0xFF2563EB);
 
-  // Radius
+  // Light orange tag colors
+  static const Color tagBg = Color(0xFFFFF4E6);
+  static const Color tagBorder = Color(0xFFFFE2C7);
+  static const Color tagText = Color(0xFFB45309);
+
+  // ============================================================
+  // RADIUS (SMALLER – CLEAN)
+  // ============================================================
+
+  static BorderRadius r10 = BorderRadius.circular(10);
   static BorderRadius r12 = BorderRadius.circular(12);
-  static BorderRadius r16 = BorderRadius.circular(16);
-  static BorderRadius r20 = BorderRadius.circular(20);
+  static BorderRadius r14 = BorderRadius.circular(14);
 
-  // Text Styles
+  // ============================================================
+  // TEXT STYLES (SLIM HIERARCHY)
+  // ============================================================
+
   static const TextStyle h1 = TextStyle(
-    fontSize: 20,
-    fontWeight: FontWeight.w800,
+    fontSize: 18,
+    fontWeight: FontWeight.w600,
     color: text,
     height: 1.2,
   );
 
-  // ✅ ADDED (USED IN HOME SECTIONS)
   static const TextStyle h2 = TextStyle(
-    fontSize: 15.5,
-    fontWeight: FontWeight.w800,
-    color: text,
-    height: 1.2,
-  );
-
-  static const TextStyle hTitle = TextStyle(
-    fontSize: 16,
-    fontWeight: FontWeight.w700,
+    fontSize: 15,
+    fontWeight: FontWeight.w600,
     color: text,
     height: 1.2,
   );
 
   static const TextStyle cardTitle = TextStyle(
-    fontSize: 14,
-    fontWeight: FontWeight.w700,
+    fontSize: 14.5,
+    fontWeight: FontWeight.w600,   // slim
     color: text,
     height: 1.2,
   );
 
-  static const TextStyle body = TextStyle(
-    fontSize: 14,
+  static const TextStyle company = TextStyle(
+    fontSize: 13,
     fontWeight: FontWeight.w500,
-    color: text,
-    height: 1.35,
+    color: muted,
+    height: 1.2,
+  );
+
+  static const TextStyle body = TextStyle(
+    fontSize: 12.5,
+    fontWeight: FontWeight.w400,   // lighter
+    color: muted,
+    height: 1.3,
   );
 
   static const TextStyle sub = TextStyle(
-    fontSize: 12.5,
-    fontWeight: FontWeight.w500,
-    color: muted,
-    height: 1.25,
-  );
-
-  static const TextStyle caption = TextStyle(
     fontSize: 11.5,
-    fontWeight: FontWeight.w600,
-    color: muted,
+    fontWeight: FontWeight.w400,
+    color: lightMuted,
     height: 1.2,
   );
 
   static const TextStyle link = TextStyle(
     fontSize: 12.5,
-    fontWeight: FontWeight.w700,
+    fontWeight: FontWeight.w500,
     color: primary,
     height: 1.2,
   );
 
-  // Card decoration
+  // ============================================================
+  // CARD DECORATION (FLAT – NO HEAVY SHADOW)
+  // ============================================================
+
   static BoxDecoration cardDecoration({
-    double? radius,
-    bool shadow = true,
+    double radius = 12,
   }) {
     return BoxDecoration(
       color: card,
-      borderRadius: BorderRadius.circular(radius ?? 16),
+      borderRadius: BorderRadius.circular(radius),
       border: Border.all(color: border),
-      boxShadow: shadow
-          ? [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.04),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
-              ),
-            ]
-          : [],
     );
   }
 
-  // Theme (Material 3)
+  // ============================================================
+  // TAG STYLE (LIGHT ORANGE – SLIM)
+  // ============================================================
+
+  static BoxDecoration tagDecoration() {
+    return BoxDecoration(
+      color: tagBg,
+      borderRadius: BorderRadius.circular(999),
+      border: Border.all(color: tagBorder),
+    );
+  }
+
+  static const TextStyle tagTextStyle = TextStyle(
+    fontSize: 10.5,
+    fontWeight: FontWeight.w500,
+    color: tagText,
+  );
+
+  // ============================================================
+  // THEME (MINIMAL)
+  // ============================================================
+
   static ThemeData theme() {
     return ThemeData(
       useMaterial3: true,
