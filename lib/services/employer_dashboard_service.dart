@@ -14,12 +14,12 @@ class EmployerDashboardService {
   }
 
   // ------------------------------------------------------------
-  // COMPANIES (MULTI COMPANY SUPPORT)
+  // ORGANIZATIONS (MULTI ORG SUPPORT)
   // ------------------------------------------------------------
 
-  /// Returns companies where current user is an active member.
-  /// This is the ONLY source of truth for employer -> company relationship.
-  Future<List<Map<String, dynamic>>> fetchMyCompanies() async {
+  /// Returns organizations where current user is an active member.
+  /// This is the ONLY source of truth for employer -> organization relationship.
+  Future<List<Map<String, dynamic>>> fetchMyOrganizations() async {
     final user = _requireUser();
 
     final res = await _db
@@ -51,7 +51,7 @@ class EmployerDashboardService {
 
     final rows = List<Map<String, dynamic>>.from(res);
 
-    final List<Map<String, dynamic>> companies = [];
+    final List<Map<String, dynamic>> orgs = [];
 
     for (final r in rows) {
       final c = r['companies'];
@@ -62,44 +62,54 @@ class EmployerDashboardService {
 
       if (id.trim().isEmpty || name.trim().isEmpty) continue;
 
-      companies.add({
+      orgs.add({
         ...Map<String, dynamic>.from(c as Map),
-        'my_role': (r['role'] ?? 'recruiter').toString(),
+        'my_role': (r['role'] ?? 'member').toString(),
         'my_status': (r['status'] ?? 'active').toString(),
         'my_joined_at': r['joined_at'],
       });
     }
 
-    // Sort by company name for stable UI
-    companies.sort((a, b) {
+    // Stable sorting for UI
+    orgs.sort((a, b) {
       final an = (a['name'] ?? '').toString().toLowerCase();
       final bn = (b['name'] ?? '').toString().toLowerCase();
       return an.compareTo(bn);
     });
 
-    return companies;
+    return orgs;
   }
 
-  /// Picks a default company for dashboard if user has multiple.
+  /// Backward compatible name
+  Future<List<Map<String, dynamic>>> fetchMyCompanies() async {
+    return fetchMyOrganizations();
+  }
+
+  /// Picks a default organization for dashboard if user has multiple.
   /// For now: first alphabetical (stable).
-  Future<String> resolveDefaultCompanyId() async {
-    final companies = await fetchMyCompanies();
-    if (companies.isEmpty) {
+  Future<String> resolveDefaultOrganizationId() async {
+    final orgs = await fetchMyOrganizations();
+    if (orgs.isEmpty) {
       throw Exception("No organization linked. Please create one first.");
     }
-    return (companies.first['id'] ?? '').toString();
+    return (orgs.first['id'] ?? '').toString();
   }
 
-  /// Loads full company object by ID (must be accessible by RLS)
-  Future<Map<String, dynamic>> fetchCompanyById({
-    required String companyId,
+  /// Backward compatible name
+  Future<String> resolveDefaultCompanyId() async {
+    return resolveDefaultOrganizationId();
+  }
+
+  /// Loads full organization object by ID (must be accessible by RLS)
+  Future<Map<String, dynamic>> fetchOrganizationById({
+    required String organizationId,
   }) async {
     _requireUser();
 
-    final id = companyId.trim();
-    if (id.isEmpty) throw Exception("Company ID missing");
+    final id = organizationId.trim();
+    if (id.isEmpty) throw Exception("Organization ID missing");
 
-    final company = await _db
+    final org = await _db
         .from('companies')
         .select('''
           id,
@@ -119,17 +129,24 @@ class EmployerDashboardService {
         .eq('id', id)
         .maybeSingle();
 
-    if (company == null) {
+    if (org == null) {
       throw Exception("Organization not found or access denied.");
     }
 
-    return Map<String, dynamic>.from(company);
+    return Map<String, dynamic>.from(org);
   }
 
-  /// Dashboard uses this (your UI already calls it)
+  /// Backward compatible name
+  Future<Map<String, dynamic>> fetchCompanyById({
+    required String companyId,
+  }) async {
+    return fetchOrganizationById(organizationId: companyId);
+  }
+
+  /// Dashboard uses this
   Future<Map<String, dynamic>> resolveMyCompany() async {
-    final companyId = await resolveDefaultCompanyId();
-    return await fetchCompanyById(companyId: companyId);
+    final companyId = await resolveDefaultOrganizationId();
+    return await fetchOrganizationById(organizationId: companyId);
   }
 
   // ------------------------------------------------------------
@@ -153,17 +170,17 @@ class EmployerDashboardService {
     final dist = district.trim();
     if (dist.isEmpty) throw Exception("District required");
 
-    // 1) create company
+    // 1) create organization (companies table)
     final inserted = await _db
         .from('companies')
         .insert({
           'name': n,
-          'industry': bt, // your DB column is industry
-          'headquarters_city': dist,
+          'industry': bt, // DB column
+          'headquarters_city': dist, // using district
           'headquarters_state': 'Assam',
           'website': website.trim().isEmpty ? null : website.trim(),
           'description': description.trim().isEmpty ? null : description.trim(),
-          'created_by': user.id, // REQUIRED in your DB
+          'created_by': user.id, // REQUIRED by your DB
         })
         .select('id')
         .single();
@@ -171,11 +188,11 @@ class EmployerDashboardService {
     final companyId = (inserted['id'] ?? '').toString().trim();
     if (companyId.isEmpty) throw Exception("Failed to create organization");
 
-    // 2) make current employer a member
+    // 2) make current employer an active member
     await _db.from('company_members').insert({
       'company_id': companyId,
       'user_id': user.id,
-      'role': 'admin',
+      'role': 'member', // your rule: only member, can do everything
       'status': 'active',
     });
 
@@ -183,7 +200,7 @@ class EmployerDashboardService {
   }
 
   // ------------------------------------------------------------
-  // JOBS (COMPANY BASED, NOT EMPLOYER BASED)
+  // JOBS (ORG BASED)
   // ------------------------------------------------------------
   Future<List<Map<String, dynamic>>> fetchCompanyJobs({
     required String companyId,
@@ -244,7 +261,7 @@ class EmployerDashboardService {
   }
 
   // ------------------------------------------------------------
-  // DASHBOARD STATS (COMPANY BASED)
+  // DASHBOARD STATS (ORG BASED)
   // ------------------------------------------------------------
   Future<Map<String, dynamic>> fetchCompanyDashboardStats({
     required String companyId,
@@ -337,7 +354,7 @@ class EmployerDashboardService {
   }
 
   // ------------------------------------------------------------
-  // RECENT APPLICANTS (COMPANY BASED)
+  // RECENT APPLICANTS (ORG BASED)
   // ------------------------------------------------------------
   Future<List<Map<String, dynamic>>> fetchRecentApplicants({
     required String companyId,
@@ -394,7 +411,7 @@ class EmployerDashboardService {
   }
 
   // ------------------------------------------------------------
-  // TOP JOBS (COMPANY BASED)
+  // TOP JOBS (ORG BASED)
   // ------------------------------------------------------------
   Future<List<Map<String, dynamic>>> fetchTopJobs({
     required String companyId,
@@ -453,7 +470,7 @@ class EmployerDashboardService {
   }
 
   // ------------------------------------------------------------
-  // TODAY'S INTERVIEWS (COMPANY BASED)
+  // TODAY'S INTERVIEWS (ORG BASED)
   // ------------------------------------------------------------
   Future<List<Map<String, dynamic>>> fetchTodayInterviews({
     required String companyId,
@@ -512,7 +529,7 @@ class EmployerDashboardService {
   }
 
   // ------------------------------------------------------------
-  // LAST 7 DAYS PERFORMANCE (COMPANY BASED)
+  // LAST 7 DAYS PERFORMANCE (ORG BASED)
   // ------------------------------------------------------------
   Future<Map<String, dynamic>> fetchLast7DaysPerformance({
     required String companyId,
@@ -526,7 +543,7 @@ class EmployerDashboardService {
     final start = now.subtract(const Duration(days: 6));
     final startDate = DateTime(start.year, start.month, start.day, 0, 0, 0);
 
-    // load company job ids
+    // load org job ids
     final jobsRes = await _db
         .from('job_listings')
         .select('id')
@@ -619,6 +636,64 @@ class EmployerDashboardService {
         .eq('is_read', false);
 
     return List<Map<String, dynamic>>.from(res).length;
+  }
+
+  // ============================================================
+  // ============================================================
+  // BACKWARD COMPATIBILITY METHODS (USED BY YOUR UI)
+  // ============================================================
+  // ============================================================
+
+  /// Your CompanyDashboard calls this:
+  /// _service.fetchEmployerJobs()
+  Future<List<Map<String, dynamic>>> fetchEmployerJobs() async {
+    final orgId = await resolveDefaultOrganizationId();
+    return await fetchCompanyJobs(companyId: orgId);
+  }
+
+  /// Your CompanyDashboard calls this:
+  /// _service.fetchEmployerDashboardStats()
+  Future<Map<String, dynamic>> fetchEmployerDashboardStats() async {
+    final orgId = await resolveDefaultOrganizationId();
+    return await fetchCompanyDashboardStats(companyId: orgId);
+  }
+
+  /// Your CompanyDashboard calls this:
+  /// _service.fetchRecentApplicants(limit: 6)
+  Future<List<Map<String, dynamic>>> fetchRecentApplicantsCompat({
+    int limit = 6,
+  }) async {
+    final orgId = await resolveDefaultOrganizationId();
+    return await fetchRecentApplicants(companyId: orgId, limit: limit);
+  }
+
+  /// IMPORTANT:
+  /// Your UI uses fetchRecentApplicants(limit: 6) WITHOUT companyId.
+  /// So we provide an overload-style alias name.
+  Future<List<Map<String, dynamic>>> fetchRecentApplicantsUI({
+    int limit = 6,
+  }) async {
+    return await fetchRecentApplicantsCompat(limit: limit);
+  }
+
+  /// Your CompanyDashboard calls:
+  /// _service.fetchTopJobs(limit: 6)
+  Future<List<Map<String, dynamic>>> fetchTopJobsCompat({
+    int limit = 6,
+  }) async {
+    final orgId = await resolveDefaultOrganizationId();
+    return await fetchTopJobs(companyId: orgId, limit: limit);
+  }
+
+  /// Your CompanyDashboard calls:
+  /// _service.fetchLast7DaysPerformance(employerId: user.id)
+  ///
+  /// We ignore employerId because performance is org based.
+  Future<Map<String, dynamic>> fetchLast7DaysPerformanceCompat({
+    required String employerId,
+  }) async {
+    final orgId = await resolveDefaultOrganizationId();
+    return await fetchLast7DaysPerformance(companyId: orgId);
   }
 
   // ------------------------------------------------------------
