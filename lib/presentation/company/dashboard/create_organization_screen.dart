@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../routes/app_routes.dart';
 import '../../../services/employer_dashboard_service.dart';
-import 'company_dashboard.dart';
 
 class CreateOrganizationScreen extends StatefulWidget {
   const CreateOrganizationScreen({Key? key}) : super(key: key);
@@ -65,6 +65,7 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
   }
 
   Future<void> _loadMasters() async {
+    if (!mounted) return;
     setState(() => _loading = true);
 
     try {
@@ -97,7 +98,7 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
   // SAVE ORGANIZATION
   // ------------------------------------------------------------
   Future<void> _create() async {
-    final user = _requireUser();
+    _requireUser();
 
     final name = _name.text.trim();
     if (name.isEmpty) {
@@ -115,11 +116,12 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
       return;
     }
 
+    if (!mounted) return;
     setState(() => _saving = true);
 
     try {
       // Create organization
-      final companyId = await _service.createOrganization(
+      await _service.createOrganization(
         name: name,
         businessType: _selectedBusinessType!,
         district: _selectedDistrict!,
@@ -129,10 +131,11 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
 
       if (!mounted) return;
 
-      // Go dashboard
-      Navigator.pushAndRemoveUntil(
+      // IMPORTANT:
+      // After org created, go to dashboard using routes (not MaterialPageRoute).
+      await Navigator.pushNamedAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => const CompanyDashboard()),
+        AppRoutes.companyDashboard,
         (_) => false,
       );
 
@@ -150,8 +153,11 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
   // ------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
+    final keyboardBottom = MediaQuery.of(context).viewInsets.bottom;
+
     return Scaffold(
       backgroundColor: _bg,
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0.7,
@@ -162,7 +168,12 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
           ? const Center(child: CircularProgressIndicator())
           : SafeArea(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  14,
+                  16,
+                  24 + keyboardBottom,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -192,7 +203,8 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
                           .map((e) => (e['name'] ?? '').toString())
                           .where((x) => x.trim().isNotEmpty)
                           .toList(),
-                      onChanged: (v) => setState(() => _selectedBusinessType = v),
+                      onChanged: (v) =>
+                          setState(() => _selectedBusinessType = v),
                     ),
                     const SizedBox(height: 14),
 
