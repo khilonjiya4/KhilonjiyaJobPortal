@@ -12,22 +12,44 @@ class EmployerApplicantsService {
   }
 
   // ------------------------------------------------------------
-  // SECURITY: ensure current user owns the job
+  // ACCESS CONTROL (REAL)
+  //
+  // Your rule now:
+  // - A job belongs to an organization (company_id)
+  // - Any active member of that organization can manage applicants
+  // - No strict employer_id ownership
   // ------------------------------------------------------------
-  Future<Map<String, dynamic>> ensureJobOwnerAndGetJob(String jobId) async {
+  Future<Map<String, dynamic>> ensureCanAccessJobAndGetJob(String jobId) async {
     final user = _requireUser();
 
     final job = await _db
         .from('job_listings')
-        .select('id, employer_id, company_id, job_title')
+        .select('id, company_id, job_title')
         .eq('id', jobId)
         .maybeSingle();
 
     if (job == null) throw Exception("Job not found");
 
-    final employerId = (job['employer_id'] ?? '').toString();
-    if (employerId != user.id) {
-      throw Exception("Not allowed to access applicants for this job");
+    final companyId = (job['company_id'] ?? '').toString().trim();
+    if (companyId.isEmpty) {
+      throw Exception("This job is not linked to any organization.");
+    }
+
+    // Must be active member of that company
+    final member = await _db
+        .from('company_members')
+        .select('id, status')
+        .eq('company_id', companyId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+    if (member == null) {
+      throw Exception("You are not a member of this organization.");
+    }
+
+    final status = (member['status'] ?? '').toString().toLowerCase();
+    if (status != 'active') {
+      throw Exception("Your organization membership is not active.");
     }
 
     return Map<String, dynamic>.from(job);
@@ -55,6 +77,7 @@ class EmployerApplicantsService {
   // ------------------------------------------------------------
   Future<List<Map<String, dynamic>>> fetchApplicantsForJob(String jobId) async {
     _requireUser();
+    await ensureCanAccessJobAndGetJob(jobId);
 
     final res = await _db
         .from('job_applications_listings')
@@ -106,7 +129,7 @@ class EmployerApplicantsService {
     required String jobId,
   }) async {
     final user = _requireUser();
-    await ensureJobOwnerAndGetJob(jobId);
+    await ensureCanAccessJobAndGetJob(jobId);
 
     // Only upgrade applied -> viewed
     final row = await _db
@@ -141,11 +164,11 @@ class EmployerApplicantsService {
   Future<void> updateApplicationStatus({
     required String listingRowId,
     required String jobId,
-    required String status, // shortlisted, rejected, selected, interviewed
+    required String status,
     String? note,
   }) async {
     final user = _requireUser();
-    await ensureJobOwnerAndGetJob(jobId);
+    await ensureCanAccessJobAndGetJob(jobId);
 
     final s = status.trim().toLowerCase();
     const allowed = {
@@ -179,8 +202,6 @@ class EmployerApplicantsService {
 
   // ------------------------------------------------------------
   // SCHEDULE INTERVIEW (REAL)
-  // Inserts into interviews table
-  // Updates job_applications_listings.interview_date + status
   // ------------------------------------------------------------
   Future<void> scheduleInterview({
     required String listingRowId,
@@ -188,15 +209,24 @@ class EmployerApplicantsService {
     required String companyId,
     required DateTime scheduledAt,
     int durationMinutes = 30,
-    String interviewType = 'video', // your enum default is 'video'
+    String interviewType = 'video',
     String? meetingLink,
     String? locationAddress,
     String? notes,
   }) async {
     final user = _requireUser();
-    await ensureJobOwnerAndGetJob(jobId);
+    final job = await ensureCanAccessJobAndGetJob(jobId);
 
-    // Insert interview
+    final jobCompanyId = (job['company_id'] ?? '').toString().trim();
+    if (jobCompanyId.isEmpty) {
+      throw Exception("Job has no organization linked.");
+    }
+
+    // safety: prevent scheduling under wrong org id
+    if (companyId.trim() != jobCompanyId) {
+      throw Exception("Organization mismatch for this job.");
+    }
+
     await _db.from('interviews').insert({
       'job_application_listing_id': listingRowId,
       'company_id': companyId,
@@ -211,7 +241,6 @@ class EmployerApplicantsService {
       'created_by': user.id,
     });
 
-    // Update listing row
     await _db.from('job_applications_listings').update({
       'interview_date': scheduledAt.toIso8601String(),
       'application_status': 'interview_scheduled',
@@ -237,7 +266,7 @@ class EmployerApplicantsService {
     required String notes,
   }) async {
     final user = _requireUser();
-    await ensureJobOwnerAndGetJob(jobId);
+    await ensureCanAccessJobAndGetJob(jobId);
 
     await _db.from('job_applications_listings').update({
       'employer_notes': notes.trim(),
@@ -255,10 +284,13 @@ class EmployerApplicantsService {
   }
 
   // ------------------------------------------------------------
-  // PIPELINE STAGE (WORKAROUND)
-  // Your schema has no pipeline_stage_id column.
-  // So we store stage in employer_notes as:
-  // [pipeline_stage_id:<uuid>]
+  // PIPELINE STAGE
+  // IMPORTANT:
+  // This is still a workaround, because your schema currently has
+  // no pipeline_stage_id column in job_applications_listings.
+  //
+  // If you want a real pipeline board, you MUST add:
+  // job_applications_listings.pipeline_stage_id uuid
   // ------------------------------------------------------------
   Future<void> moveApplicantToStage({
     required String listingRowId,
@@ -267,7 +299,7 @@ class EmployerApplicantsService {
     String? note,
   }) async {
     final user = _requireUser();
-    await ensureJobOwnerAndGetJob(jobId);
+    await ensureCanAccessJobAndGetJob(jobId);
 
     final row = await _db
         .from('job_applications_listings')
