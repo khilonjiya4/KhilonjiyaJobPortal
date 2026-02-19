@@ -19,7 +19,30 @@ class EmployerJobsService {
   }
 
   // ------------------------------------------------------------
-  // FETCH JOBS (WITH APPLICATION COUNTS)
+  // COMPANY IDS (MULTI-ORG)
+  // ------------------------------------------------------------
+  Future<List<String>> fetchMyActiveCompanyIds() async {
+    final user = _requireUser();
+
+    final res = await _db
+        .from('company_members')
+        .select('company_id,status')
+        .eq('user_id', user.id)
+        .eq('status', 'active');
+
+    final rows = List<Map<String, dynamic>>.from(res);
+
+    final ids = rows
+        .map((e) => (e['company_id'] ?? '').toString().trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
+
+    return ids;
+  }
+
+  // ------------------------------------------------------------
+  // FETCH JOBS (MULTI-ORG) + APPLICATION COUNTS
   // ------------------------------------------------------------
   Future<List<Map<String, dynamic>>> fetchEmployerJobs({
     String search = '',
@@ -34,9 +57,14 @@ class EmployerJobsService {
 
     final searchText = search.trim();
 
-    // IMPORTANT:
-    // After .select() the builder becomes PostgrestTransformBuilder,
-    // so we avoid reassigning it into a typed builder variable.
+    // 1) Fetch all orgs where this employer is an active member
+    final companyIds = await fetchMyActiveCompanyIds();
+
+    // If user is not member of any org, show empty list.
+    // (Employer must create org first.)
+    if (companyIds.isEmpty) return [];
+
+    // 2) Fetch jobs for those companies
     var query = _db
         .from('job_listings')
         .select('''
@@ -55,7 +83,7 @@ class EmployerJobsService {
           created_at,
           expires_at
         ''')
-        .eq('employer_id', user.id);
+        .inFilter('company_id', companyIds);
 
     if (s != 'all') {
       query = query.eq('status', s);
@@ -72,7 +100,7 @@ class EmployerJobsService {
 
     final jobIds = jobList.map((e) => e['id'].toString()).toList();
 
-    // Applications count
+    // 3) Applications count
     final appsRes = await _db
         .from('job_applications_listings')
         .select('listing_id')
@@ -115,7 +143,43 @@ class EmployerJobsService {
       throw Exception("Invalid status: $newStatus");
     }
 
-    // Ensure employer owns this job
+    // IMPORTANT:
+    // Since we allow multiple employers to manage same company,
+    // the permission check must be based on company membership, not employer_id.
+    //
+    // So:
+    // 1) Load job company_id
+    // 2) Ensure user is active member of that company
+    // 3) Update
+
+    final job = await _db
+        .from('job_listings')
+        .select('id,company_id,status')
+        .eq('id', id)
+        .maybeSingle();
+
+    if (job == null) {
+      throw Exception("Job not found.");
+    }
+
+    final companyId = (job['company_id'] ?? '').toString().trim();
+    if (companyId.isEmpty) {
+      throw Exception("Job has no organization linked.");
+    }
+
+    final membership = await _db
+        .from('company_members')
+        .select('id,status')
+        .eq('company_id', companyId)
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .maybeSingle();
+
+    if (membership == null) {
+      throw Exception("Not permitted. You are not a member of this organization.");
+    }
+
+    // Update job
     final updated = await _db
         .from('job_listings')
         .update({
@@ -123,12 +187,11 @@ class EmployerJobsService {
           'updated_at': DateTime.now().toIso8601String(),
         })
         .eq('id', id)
-        .eq('employer_id', user.id)
-        .select('id,status')
+        .select('id,status,company_id')
         .maybeSingle();
 
     if (updated == null) {
-      throw Exception("Job not found or not permitted.");
+      throw Exception("Update failed.");
     }
 
     // Optional: status history
@@ -136,6 +199,8 @@ class EmployerJobsService {
       await _db.from('job_status_history').insert({
         'job_id': id,
         'employer_id': user.id,
+        'company_id': companyId,
+        'old_status': (job['status'] ?? '').toString(),
         'new_status': s,
         'changed_at': DateTime.now().toIso8601String(),
       });
@@ -143,7 +208,7 @@ class EmployerJobsService {
   }
 
   // ------------------------------------------------------------
-  // DELETE JOB (REAL)
+  // DELETE JOB (MULTI-ORG SAFE)
   // ------------------------------------------------------------
   Future<void> deleteJob({required String jobId}) async {
     final user = _requireUser();
@@ -151,28 +216,36 @@ class EmployerJobsService {
     final id = jobId.trim();
     if (id.isEmpty) throw Exception("Job ID missing");
 
-    // Ensure job belongs to employer
+    // 1) Load job + company_id
     final job = await _db
         .from('job_listings')
-        .select('id')
+        .select('id,company_id')
         .eq('id', id)
-        .eq('employer_id', user.id)
         .maybeSingle();
 
     if (job == null) {
-      throw Exception("Job not found or not permitted.");
+      throw Exception("Job not found.");
     }
 
-    // IMPORTANT:
-    // Your DB has job_applications_listings referencing job_listings.
-    // If foreign key is NOT ON DELETE CASCADE, delete will fail.
-    //
-    // So we do safe deletion order:
-    // 1) delete stage history + events + interviews (if any)
-    // 2) delete job_applications_listings
-    // 3) delete job_listings
+    final companyId = (job['company_id'] ?? '').toString().trim();
+    if (companyId.isEmpty) {
+      throw Exception("Job has no organization linked.");
+    }
 
-    // 1) Load all application listing rows for this job
+    // 2) Membership check
+    final membership = await _db
+        .from('company_members')
+        .select('id,status')
+        .eq('company_id', companyId)
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .maybeSingle();
+
+    if (membership == null) {
+      throw Exception("Not permitted. You are not a member of this organization.");
+    }
+
+    // 3) Safe deletion order (because FK may block)
     final listingRows = await _db
         .from('job_applications_listings')
         .select('id')
@@ -211,53 +284,17 @@ class EmployerJobsService {
       } catch (_) {}
     }
 
-    // 2) delete job_applications_listings rows
+    // delete job_applications_listings rows
     try {
       await _db.from('job_applications_listings').delete().eq('listing_id', id);
     } catch (e) {
       throw Exception(
-        "Cannot delete job because applications exist and DB constraints blocked deletion. "
-        "Enable ON DELETE CASCADE or allow soft delete.\n\n$e",
+        "Cannot delete job because applications exist and DB constraints blocked deletion.\n\n$e",
       );
     }
 
-    // 3) delete the job itself
-    await _db
-        .from('job_listings')
-        .delete()
-        .eq('id', id)
-        .eq('employer_id', user.id);
-  }
-
-  // ------------------------------------------------------------
-  // COMPANY ID FOR PIPELINE PAGE
-  // ------------------------------------------------------------
-  Future<String> resolveMyCompanyId() async {
-    final user = _requireUser();
-
-    // owner_id
-    final owned = await _db
-        .from('companies')
-        .select('id')
-        .eq('owner_id', user.id)
-        .maybeSingle();
-
-    if (owned != null) return (owned['id'] ?? '').toString();
-
-    // company_members
-    final member = await _db
-        .from('company_members')
-        .select('company_id,status')
-        .eq('user_id', user.id)
-        .eq('status', 'active')
-        .maybeSingle();
-
-    if (member == null) throw Exception("No company linked to employer account");
-
-    final companyId = (member['company_id'] ?? '').toString();
-    if (companyId.trim().isEmpty) throw Exception("Company ID invalid");
-
-    return companyId;
+    // delete the job itself
+    await _db.from('job_listings').delete().eq('id', id);
   }
 
   // ------------------------------------------------------------
