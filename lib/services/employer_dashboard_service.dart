@@ -14,88 +14,60 @@ class EmployerDashboardService {
   }
 
   // ------------------------------------------------------------
-  // ORGANIZATIONS (MULTI ORG SUPPORT)
+  // ORGANIZATIONS
   // ------------------------------------------------------------
-
-  /// Returns organizations where current user is an active member.
-  /// This is the ONLY source of truth for employer -> organization relationship.
-  ///
-  /// IMPORTANT:
-  /// We intentionally do NOT join companies(...) inside this query,
-  /// because badly written RLS policies can cause infinite recursion.
   Future<List<Map<String, dynamic>>> fetchMyOrganizations() async {
     final user = _requireUser();
 
-    // 1) load memberships only (no join)
-    final membersRes = await _db
+    final res = await _db
         .from('company_members')
-        .select('company_id, role, status, joined_at')
+        .select('''
+          company_id,
+          role,
+          status,
+          joined_at,
+          companies (
+            id,
+            name,
+            logo_url,
+            is_verified,
+            headquarters_city,
+            headquarters_state,
+            industry,
+            company_size,
+            website,
+            description,
+            rating,
+            total_reviews,
+            created_at,
+            business_type_id
+          )
+        ''')
         .eq('user_id', user.id)
         .eq('status', 'active')
         .order('joined_at', ascending: false);
 
-    final members = List<Map<String, dynamic>>.from(membersRes);
+    final rows = List<Map<String, dynamic>>.from(res);
 
-    final companyIds = members
-        .map((m) => (m['company_id'] ?? '').toString().trim())
-        .where((x) => x.isNotEmpty)
-        .toSet()
-        .toList();
-
-    if (companyIds.isEmpty) return [];
-
-    // 2) load companies in a separate query
-    final companiesRes = await _db
-        .from('companies')
-        .select('''
-          id,
-          name,
-          logo_url,
-          is_verified,
-          headquarters_city,
-          headquarters_state,
-          industry,
-          company_size,
-          website,
-          description,
-          rating,
-          total_reviews,
-          created_at
-        ''')
-        .inFilter('id', companyIds);
-
-    final companies = List<Map<String, dynamic>>.from(companiesRes);
-
-    // map id -> company
-    final Map<String, Map<String, dynamic>> companyMap = {};
-    for (final c in companies) {
-      final id = (c['id'] ?? '').toString().trim();
-      if (id.isEmpty) continue;
-      companyMap[id] = c;
-    }
-
-    // merge membership + company
     final List<Map<String, dynamic>> orgs = [];
 
-    for (final m in members) {
-      final cid = (m['company_id'] ?? '').toString().trim();
-      if (cid.isEmpty) continue;
+    for (final r in rows) {
+      final c = r['companies'];
+      if (c == null || c is! Map) continue;
 
-      final c = companyMap[cid];
-      if (c == null) continue;
+      final id = (c['id'] ?? '').toString();
+      final name = (c['name'] ?? '').toString();
 
-      final name = (c['name'] ?? '').toString().trim();
-      if (name.isEmpty) continue;
+      if (id.trim().isEmpty || name.trim().isEmpty) continue;
 
       orgs.add({
-        ...Map<String, dynamic>.from(c),
-        'my_role': (m['role'] ?? 'member').toString(),
-        'my_status': (m['status'] ?? 'active').toString(),
-        'my_joined_at': m['joined_at'],
+        ...Map<String, dynamic>.from(c as Map),
+        'my_role': (r['role'] ?? 'member').toString(),
+        'my_status': (r['status'] ?? 'active').toString(),
+        'my_joined_at': r['joined_at'],
       });
     }
 
-    // Stable sorting for UI
     orgs.sort((a, b) {
       final an = (a['name'] ?? '').toString().toLowerCase();
       final bn = (b['name'] ?? '').toString().toLowerCase();
@@ -105,13 +77,10 @@ class EmployerDashboardService {
     return orgs;
   }
 
-  /// Backward compatible name
   Future<List<Map<String, dynamic>>> fetchMyCompanies() async {
     return fetchMyOrganizations();
   }
 
-  /// Picks a default organization for dashboard if user has multiple.
-  /// For now: first alphabetical (stable).
   Future<String> resolveDefaultOrganizationId() async {
     final orgs = await fetchMyOrganizations();
     if (orgs.isEmpty) {
@@ -120,12 +89,10 @@ class EmployerDashboardService {
     return (orgs.first['id'] ?? '').toString();
   }
 
-  /// Backward compatible name
   Future<String> resolveDefaultCompanyId() async {
     return resolveDefaultOrganizationId();
   }
 
-  /// Loads full organization object by ID (must be accessible by RLS)
   Future<Map<String, dynamic>> fetchOrganizationById({
     required String organizationId,
   }) async {
@@ -149,7 +116,8 @@ class EmployerDashboardService {
           description,
           rating,
           total_reviews,
-          created_at
+          created_at,
+          business_type_id
         ''')
         .eq('id', id)
         .maybeSingle();
@@ -161,14 +129,12 @@ class EmployerDashboardService {
     return Map<String, dynamic>.from(org);
   }
 
-  /// Backward compatible name
   Future<Map<String, dynamic>> fetchCompanyById({
     required String companyId,
   }) async {
     return fetchOrganizationById(organizationId: companyId);
   }
 
-  /// Dashboard uses this
   Future<Map<String, dynamic>> resolveMyCompany() async {
     final companyId = await resolveDefaultOrganizationId();
     return await fetchOrganizationById(organizationId: companyId);
@@ -176,11 +142,14 @@ class EmployerDashboardService {
 
   // ------------------------------------------------------------
   // CREATE ORGANIZATION (REAL)
+  // REQUIRED BY YOUR SCHEMA:
+  // companies.business_type_id (uuid NOT NULL)
+  // companies.created_by (uuid NOT NULL)
   // ------------------------------------------------------------
   Future<String> createOrganization({
     required String name,
-    required String businessType,
-    required String district,
+    required String businessTypeId,
+    required String districtId,
     String website = '',
     String description = '',
   }) async {
@@ -189,23 +158,40 @@ class EmployerDashboardService {
     final n = name.trim();
     if (n.isEmpty) throw Exception("Organization name required");
 
-    final bt = businessType.trim();
-    if (bt.isEmpty) throw Exception("Business type required");
+    final btId = businessTypeId.trim();
+    if (btId.isEmpty) throw Exception("Business type required");
 
-    final dist = district.trim();
-    if (dist.isEmpty) throw Exception("District required");
+    final distId = districtId.trim();
+    if (distId.isEmpty) throw Exception("District required");
 
-    // 1) create organization (companies table)
+    // resolve district name from master
+    final distRow = await _db
+        .from('assam_districts_master')
+        .select('district_name')
+        .eq('id', distId)
+        .maybeSingle();
+
+    if (distRow == null) {
+      throw Exception("District invalid");
+    }
+
+    final districtName = (distRow['district_name'] ?? '').toString().trim();
+    if (districtName.isEmpty) {
+      throw Exception("District invalid");
+    }
+
+    // create org
     final inserted = await _db
         .from('companies')
         .insert({
           'name': n,
-          'industry': bt,
-          'headquarters_city': dist,
+          'business_type_id': btId,
+          'headquarters_city': districtName,
           'headquarters_state': 'Assam',
           'website': website.trim().isEmpty ? null : website.trim(),
           'description': description.trim().isEmpty ? null : description.trim(),
           'created_by': user.id,
+          'owner_id': user.id,
         })
         .select('id')
         .single();
@@ -213,14 +199,11 @@ class EmployerDashboardService {
     final companyId = (inserted['id'] ?? '').toString().trim();
     if (companyId.isEmpty) throw Exception("Failed to create organization");
 
-    // 2) make current employer an active member
-    //
-    // NOTE:
-    // If your RLS policy is wrong, this insert can fail.
+    // add member
     await _db.from('company_members').insert({
       'company_id': companyId,
       'user_id': user.id,
-      'role': 'member',
+      'role': 'recruiter',
       'status': 'active',
     });
 
@@ -228,7 +211,7 @@ class EmployerDashboardService {
   }
 
   // ------------------------------------------------------------
-  // JOBS (ORG BASED)
+  // JOBS
   // ------------------------------------------------------------
   Future<List<Map<String, dynamic>>> fetchCompanyJobs({
     required String companyId,
@@ -264,7 +247,6 @@ class EmployerDashboardService {
 
     final jobIds = jobList.map((e) => (e['id'] ?? '').toString()).toList();
 
-    // Application counts
     final appsRes = await _db
         .from('job_applications_listings')
         .select('listing_id')
@@ -289,7 +271,7 @@ class EmployerDashboardService {
   }
 
   // ------------------------------------------------------------
-  // DASHBOARD STATS (ORG BASED)
+  // DASHBOARD STATS
   // ------------------------------------------------------------
   Future<Map<String, dynamic>> fetchCompanyDashboardStats({
     required String companyId,
@@ -298,30 +280,6 @@ class EmployerDashboardService {
 
     final id = companyId.trim();
     if (id.isEmpty) throw Exception("Company ID missing");
-
-    // Optional RPC (if you create later)
-    try {
-      final rpcRes = await _db.rpc(
-        'rpc_company_dashboard_stats',
-        params: {'p_company_id': id},
-      );
-
-      if (rpcRes != null && rpcRes is Map) {
-        final m = Map<String, dynamic>.from(rpcRes);
-
-        m.putIfAbsent('total_jobs', () => 0);
-        m.putIfAbsent('active_jobs', () => 0);
-        m.putIfAbsent('paused_jobs', () => 0);
-        m.putIfAbsent('closed_jobs', () => 0);
-        m.putIfAbsent('expired_jobs', () => 0);
-
-        m.putIfAbsent('total_applicants', () => 0);
-        m.putIfAbsent('total_views', () => 0);
-        m.putIfAbsent('applicants_last_24h', () => 0);
-
-        return m;
-      }
-    } catch (_) {}
 
     // fallback compute
     final jobsRes = await _db
@@ -382,334 +340,16 @@ class EmployerDashboardService {
   }
 
   // ------------------------------------------------------------
-  // RECENT APPLICANTS (ORG BASED)
+  // BACKWARD COMPATIBILITY
   // ------------------------------------------------------------
-  Future<List<Map<String, dynamic>>> fetchRecentApplicants({
-    required String companyId,
-    int limit = 6,
-  }) async {
-    _requireUser();
-
-    final id = companyId.trim();
-    if (id.isEmpty) throw Exception("Company ID missing");
-
-    final jobsRes = await _db
-        .from('job_listings')
-        .select('id')
-        .eq('company_id', id);
-
-    final jobs = List<Map<String, dynamic>>.from(jobsRes);
-    final jobIds = jobs.map((e) => (e['id'] ?? '').toString()).toList();
-    if (jobIds.isEmpty) return [];
-
-    final res = await _db
-        .from('job_applications_listings')
-        .select('''
-          id,
-          listing_id,
-          application_id,
-          applied_at,
-          application_status,
-
-          job_listings (
-            id,
-            job_title,
-            company_id
-          ),
-
-          job_applications (
-            id,
-            user_id,
-            name,
-            phone,
-            email,
-            district,
-            education,
-            experience_level,
-            expected_salary,
-            resume_file_url,
-            photo_file_url
-          )
-        ''')
-        .inFilter('listing_id', jobIds)
-        .order('applied_at', ascending: false)
-        .limit(limit);
-
-    return List<Map<String, dynamic>>.from(res);
-  }
-
-  // ------------------------------------------------------------
-  // TOP JOBS (ORG BASED)
-  // ------------------------------------------------------------
-  Future<List<Map<String, dynamic>>> fetchTopJobs({
-    required String companyId,
-    int limit = 6,
-  }) async {
-    _requireUser();
-
-    final id = companyId.trim();
-    if (id.isEmpty) throw Exception("Company ID missing");
-
-    final jobsRes = await _db
-        .from('job_listings')
-        .select('''
-          id,
-          job_title,
-          status,
-          views_count,
-          created_at
-        ''')
-        .eq('company_id', id);
-
-    final jobs = List<Map<String, dynamic>>.from(jobsRes);
-    if (jobs.isEmpty) return [];
-
-    final jobIds = jobs.map((e) => (e['id'] ?? '').toString()).toList();
-
-    final appsRes = await _db
-        .from('job_applications_listings')
-        .select('listing_id')
-        .inFilter('listing_id', jobIds);
-
-    final apps = List<Map<String, dynamic>>.from(appsRes);
-
-    final Map<String, int> countMap = {};
-    for (final a in apps) {
-      final jid = (a['listing_id'] ?? '').toString();
-      if (jid.isEmpty) continue;
-      countMap[jid] = (countMap[jid] ?? 0) + 1;
-    }
-
-    final enriched = jobs.map((j) {
-      final jid = (j['id'] ?? '').toString();
-      return {
-        ...j,
-        'applications_count': countMap[jid] ?? 0,
-      };
-    }).toList();
-
-    enriched.sort((a, b) {
-      final ac = _toInt(a['applications_count']);
-      final bc = _toInt(b['applications_count']);
-      return bc.compareTo(ac);
-    });
-
-    return enriched.take(limit).toList();
-  }
-
-  // ------------------------------------------------------------
-  // TODAY'S INTERVIEWS (ORG BASED)
-  // ------------------------------------------------------------
-  Future<List<Map<String, dynamic>>> fetchTodayInterviews({
-    required String companyId,
-    int limit = 10,
-  }) async {
-    _requireUser();
-
-    final id = companyId.trim();
-    if (id.isEmpty) throw Exception("Company ID missing");
-
-    final now = DateTime.now();
-    final start = DateTime(now.year, now.month, now.day, 0, 0, 0);
-    final end = DateTime(now.year, now.month, now.day, 23, 59, 59);
-
-    final res = await _db
-        .from('interviews')
-        .select('''
-          id,
-          job_application_listing_id,
-          company_id,
-          round_number,
-          interview_type,
-          scheduled_at,
-          duration_minutes,
-          meeting_link,
-          location_address,
-          notes,
-          created_at,
-
-          job_applications_listings (
-            id,
-            listing_id,
-            application_status,
-
-            job_listings (
-              id,
-              job_title
-            ),
-
-            job_applications (
-              id,
-              name,
-              phone,
-              email,
-              photo_file_url
-            )
-          )
-        ''')
-        .eq('company_id', id)
-        .gte('scheduled_at', start.toIso8601String())
-        .lte('scheduled_at', end.toIso8601String())
-        .order('scheduled_at', ascending: true)
-        .limit(limit);
-
-    return List<Map<String, dynamic>>.from(res);
-  }
-
-  // ------------------------------------------------------------
-  // LAST 7 DAYS PERFORMANCE (ORG BASED)
-  // ------------------------------------------------------------
-  Future<Map<String, dynamic>> fetchLast7DaysPerformance({
-    required String companyId,
-  }) async {
-    _requireUser();
-
-    final id = companyId.trim();
-    if (id.isEmpty) throw Exception("Company ID missing");
-
-    final now = DateTime.now();
-    final start = now.subtract(const Duration(days: 6));
-    final startDate = DateTime(start.year, start.month, start.day, 0, 0, 0);
-
-    // load org job ids
-    final jobsRes = await _db
-        .from('job_listings')
-        .select('id')
-        .eq('company_id', id);
-
-    final jobs = List<Map<String, dynamic>>.from(jobsRes);
-    final jobIds = jobs.map((e) => (e['id'] ?? '').toString()).toList();
-
-    // build days map
-    final List<Map<String, dynamic>> days = [];
-    for (int i = 0; i < 7; i++) {
-      final d = startDate.add(Duration(days: i));
-      days.add({
-        'date': DateTime(d.year, d.month, d.day).toIso8601String(),
-        'views': 0,
-        'applications': 0,
-      });
-    }
-
-    if (jobIds.isEmpty) {
-      return {
-        'days': days,
-        'total_views': 0,
-        'total_applications': 0,
-      };
-    }
-
-    // views in last 7 days
-    final viewsRes = await _db
-        .from('job_views')
-        .select('job_id, viewed_at')
-        .inFilter('job_id', jobIds)
-        .gte('viewed_at', startDate.toIso8601String());
-
-    final views = List<Map<String, dynamic>>.from(viewsRes);
-
-    // applications in last 7 days
-    final appsRes = await _db
-        .from('job_applications_listings')
-        .select('listing_id, applied_at')
-        .inFilter('listing_id', jobIds)
-        .gte('applied_at', startDate.toIso8601String());
-
-    final apps = List<Map<String, dynamic>>.from(appsRes);
-
-    int totalViews = 0;
-    int totalApps = 0;
-
-    int dayIndex(DateTime d) {
-      final base = DateTime(startDate.year, startDate.month, startDate.day);
-      final dd = DateTime(d.year, d.month, d.day);
-      return dd.difference(base).inDays;
-    }
-
-    for (final v in views) {
-      final t = DateTime.tryParse((v['viewed_at'] ?? '').toString());
-      if (t == null) continue;
-      final idx = dayIndex(t);
-      if (idx < 0 || idx > 6) continue;
-      days[idx]['views'] = (days[idx]['views'] as int) + 1;
-      totalViews++;
-    }
-
-    for (final a in apps) {
-      final t = DateTime.tryParse((a['applied_at'] ?? '').toString());
-      if (t == null) continue;
-      final idx = dayIndex(t);
-      if (idx < 0 || idx > 6) continue;
-      days[idx]['applications'] = (days[idx]['applications'] as int) + 1;
-      totalApps++;
-    }
-
-    return {
-      'days': days,
-      'total_views': totalViews,
-      'total_applications': totalApps,
-    };
-  }
-
-  // ------------------------------------------------------------
-  // NOTIFICATIONS
-  // ------------------------------------------------------------
-  Future<int> fetchUnreadNotificationsCount() async {
-    final user = _requireUser();
-
-    final res = await _db
-        .from('notifications')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('is_read', false);
-
-    return List<Map<String, dynamic>>.from(res).length;
-  }
-
-  // ============================================================
-  // BACKWARD COMPATIBILITY METHODS (USED BY YOUR UI)
-  // ============================================================
-
-  /// Your CompanyDashboard calls this:
-  /// _service.fetchEmployerJobs()
   Future<List<Map<String, dynamic>>> fetchEmployerJobs() async {
     final orgId = await resolveDefaultOrganizationId();
     return await fetchCompanyJobs(companyId: orgId);
   }
 
-  /// Your CompanyDashboard calls this:
-  /// _service.fetchEmployerDashboardStats()
   Future<Map<String, dynamic>> fetchEmployerDashboardStats() async {
     final orgId = await resolveDefaultOrganizationId();
     return await fetchCompanyDashboardStats(companyId: orgId);
-  }
-
-  /// Your UI uses fetchRecentApplicants(limit: 6) WITHOUT companyId.
-  Future<List<Map<String, dynamic>>> fetchRecentApplicantsUI({
-    int limit = 6,
-  }) async {
-    final orgId = await resolveDefaultOrganizationId();
-    return await fetchRecentApplicants(companyId: orgId, limit: limit);
-  }
-
-  /// Your CompanyDashboard calls:
-  /// _service.fetchTopJobs(limit: 6)
-  Future<List<Map<String, dynamic>>> fetchTopJobsCompat({
-    int limit = 6,
-  }) async {
-    final orgId = await resolveDefaultOrganizationId();
-    return await fetchTopJobs(companyId: orgId, limit: limit);
-  }
-
-  /// Your CompanyDashboard calls:
-  /// _service.fetchLast7DaysPerformance(employerId: user.id)
-  ///
-  /// We ignore employerId because performance is org based.
-  Future<Map<String, dynamic>> fetchLast7DaysPerformanceCompat({
-    required String employerId,
-  }) async {
-    final orgId = await resolveDefaultOrganizationId();
-    return await fetchLast7DaysPerformance(companyId: orgId);
   }
 
   // ------------------------------------------------------------
