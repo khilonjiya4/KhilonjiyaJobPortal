@@ -6,10 +6,10 @@ import '../presentation/auth/employer_login_screen.dart';
 
 import 'home_router.dart';
 
-// JOB SEEKER MAIN SHELL (BOTTOM NAV)
+// JOB SEEKER MAIN SHELL
 import '../presentation/home_marketplace_feed/job_seeker_main_shell.dart';
 
-// PROFILE EDIT (PUSH PAGE)
+// PROFILE EDIT
 import '../presentation/home_marketplace_feed/profile_edit_page.dart';
 
 // SETTINGS
@@ -22,22 +22,9 @@ import '../presentation/home_marketplace_feed/legal/refund_policy_page.dart';
 import '../presentation/home_marketplace_feed/about/about_app_page.dart';
 import '../presentation/home_marketplace_feed/support/contact_support_page.dart';
 
-// SETTINGS PAGES
+// SETTINGS CHILD PAGES
 import '../presentation/home_marketplace_feed/settings/notifications_settings_page.dart';
 import '../presentation/home_marketplace_feed/settings/language_settings_page.dart';
-
-// EMPLOYER
-import '../presentation/company/dashboard/company_dashboard.dart';
-import '../presentation/company/dashboard/create_organization_screen.dart';
-import '../presentation/company/jobs/create_job_screen.dart';
-import '../presentation/company/jobs/employer_job_list_screen.dart';
-import '../presentation/company/jobs/job_applicants_screen.dart';
-
-// PIPELINE
-import '../presentation/company/jobs/job_applicants_pipeline_page.dart';
-
-// EMPLOYER NOTIFICATIONS
-import '../presentation/company/notifications/employer_notifications_page.dart';
 
 class AppRoutes {
   // ------------------------------------------------------------
@@ -57,14 +44,14 @@ class AppRoutes {
   static const String employerLogin = '/employer-login';
 
   // ------------------------------------------------------------
-  // POST LOGIN (ROLE BASED)
+  // POST LOGIN
   // ------------------------------------------------------------
   static const String home = '/home';
+  static const String jobSeekerHome = '/job-seeker-home';
 
   // ------------------------------------------------------------
   // JOB SEEKER
   // ------------------------------------------------------------
-  static const String jobSeekerHome = '/job-seeker-home';
   static const String profileEdit = '/profile-edit';
 
   // ------------------------------------------------------------
@@ -88,29 +75,7 @@ class AppRoutes {
   static const String contactSupport = '/contact-support';
 
   // ------------------------------------------------------------
-  // EMPLOYER
-  // ------------------------------------------------------------
-  static const String companyDashboard = '/company-dashboard';
-
-  // NEW: CREATE ORGANIZATION
-  static const String createOrganization = '/create-organization';
-
-  static const String employerJobs = '/employer-jobs';
-  static const String createJob = '/create-job';
-
-  // Requires arguments: { jobId } or { jobId, companyId }
-  static const String jobApplicants = '/job-applicants';
-
-  // Requires arguments: { jobId, companyId }
-  static const String jobApplicantsPipeline = '/job-applicants-pipeline';
-
-  // ------------------------------------------------------------
-  // EMPLOYER NOTIFICATIONS
-  // ------------------------------------------------------------
-  static const String employerNotifications = '/employer-notifications';
-
-  // ------------------------------------------------------------
-  // ROUTES MAP (NO-ARGUMENT ROUTES ONLY)
+  // ROUTES MAP (NO ARG ROUTES)
   // ------------------------------------------------------------
   static final Map<String, WidgetBuilder> routes = {
     initial: (_) => const RoleSelectionScreen(),
@@ -139,89 +104,12 @@ class AppRoutes {
     // about + support
     aboutApp: (_) => const AboutAppPage(),
     contactSupport: (_) => const ContactSupportPage(),
-
-    // employer
-    companyDashboard: (_) => const CompanyDashboard(),
-    createOrganization: (_) => const CreateOrganizationScreen(),
-    employerJobs: (_) => const EmployerJobListScreen(),
-    createJob: (_) => const CreateJobScreen(),
-
-    // notifications
-    employerNotifications: (_) => const EmployerNotificationsPage(),
   };
 
   // ------------------------------------------------------------
-  // onGenerateRoute (ARGUMENT ROUTES)
+  // onGenerateRoute (NO EMPLOYER CASES)
   // ------------------------------------------------------------
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
-    switch (settings.name) {
-      case jobApplicants:
-        final args = settings.arguments;
-
-        if (args == null || args is! Map) {
-          return MaterialPageRoute(
-            builder: (_) => const Scaffold(
-              body: Center(
-                child: Text("Missing arguments for applicants screen"),
-              ),
-            ),
-          );
-        }
-
-        final jobId = (args['jobId'] ?? '').toString().trim();
-        final companyId = (args['companyId'] ?? '').toString().trim();
-
-        if (jobId.isEmpty) {
-          return MaterialPageRoute(
-            builder: (_) => const Scaffold(
-              body: Center(
-                child: Text("jobId missing for applicants screen"),
-              ),
-            ),
-          );
-        }
-
-        return MaterialPageRoute(
-          builder: (_) => JobApplicantsScreen(
-            jobId: jobId,
-            companyId: companyId.isEmpty ? null : companyId,
-          ),
-        );
-
-      case jobApplicantsPipeline:
-        final args = settings.arguments;
-
-        if (args == null || args is! Map) {
-          return MaterialPageRoute(
-            builder: (_) => const Scaffold(
-              body: Center(
-                child: Text("Missing arguments for pipeline page"),
-              ),
-            ),
-          );
-        }
-
-        final jobId = (args['jobId'] ?? '').toString().trim();
-        final companyId = (args['companyId'] ?? '').toString().trim();
-
-        if (jobId.isEmpty || companyId.isEmpty) {
-          return MaterialPageRoute(
-            builder: (_) => const Scaffold(
-              body: Center(
-                child: Text("jobId/companyId missing for pipeline page"),
-              ),
-            ),
-          );
-        }
-
-        return MaterialPageRoute(
-          builder: (_) => JobApplicantsPipelinePage(
-            jobId: jobId,
-            companyId: companyId,
-          ),
-        );
-    }
-
     return MaterialPageRoute(
       builder: (_) => Scaffold(
         body: Center(
