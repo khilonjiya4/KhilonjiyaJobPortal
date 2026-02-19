@@ -207,12 +207,11 @@ class EmployerDashboardService {
 
     // 2) make current employer an active member
     await _db.from('company_members').insert({
-      'company_id': companyId,
-      'user_id': user.id,
-      'role': 'member',
-      'status': 'active',
-    });
-
+  'company_id': companyId,
+  'user_id': user.id,
+  'role': 'admin_or_whatever',
+  'status': 'active',
+});
     return companyId;
   }
 
