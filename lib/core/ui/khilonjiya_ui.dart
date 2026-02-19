@@ -1,119 +1,92 @@
 import 'package:flutter/material.dart';
 
 class KhilonjiyaUI {
-  // ============================================================
-  // COLORS (NAUKRI STYLE – SOFT & LIGHT)
-  // ============================================================
+  // ================= COLORS =================
 
-  static const Color bg = Color(0xFFF8FAFC);          // lighter background
+  static const Color bg = Color(0xFFF8F9FB);
   static const Color card = Colors.white;
-  static const Color border = Color(0xFFF1F5F9);      // softer border
+  static const Color border = Color(0xFFF1F3F6);
   static const Color text = Color(0xFF111827);
-  static const Color muted = Color(0xFF64748B);
-  static const Color lightMuted = Color(0xFF94A3B8);
+  static const Color muted = Color(0xFF6B7280);
   static const Color primary = Color(0xFF2563EB);
 
-  // Light orange tag colors
-  static const Color tagBg = Color(0xFFFFF4E6);
-  static const Color tagBorder = Color(0xFFFFE2C7);
-  static const Color tagText = Color(0xFFB45309);
+  // Modern soft tag (startup style)
+  static const Color tagBg = Color(0xFFFFF3E8);
+  static const Color tagText = Color(0xFFEA580C);
 
-  // ============================================================
-  // RADIUS (SMALLER – CLEAN)
-  // ============================================================
+  // ================= RADIUS =================
 
+  static BorderRadius r8 = BorderRadius.circular(8);
   static BorderRadius r10 = BorderRadius.circular(10);
   static BorderRadius r12 = BorderRadius.circular(12);
-  static BorderRadius r14 = BorderRadius.circular(14);
 
-  // ============================================================
-  // TEXT STYLES (SLIM HIERARCHY)
-  // ============================================================
+  // ================= TYPOGRAPHY =================
 
-  static const TextStyle h1 = TextStyle(
-    fontSize: 18,
+  // Job Title (primary attention)
+  static const TextStyle jobTitle = TextStyle(
+    fontSize: 15.5,
     fontWeight: FontWeight.w600,
     color: text,
-    height: 1.2,
+    height: 1.25,
+    letterSpacing: -0.2,
   );
 
-  static const TextStyle h2 = TextStyle(
-    fontSize: 15,
-    fontWeight: FontWeight.w600,
-    color: text,
-    height: 1.2,
-  );
-
-  static const TextStyle cardTitle = TextStyle(
-    fontSize: 14.5,
-    fontWeight: FontWeight.w600,   // slim
-    color: text,
-    height: 1.2,
-  );
-
+  // Company name
   static const TextStyle company = TextStyle(
-    fontSize: 13,
+    fontSize: 13.5,
     fontWeight: FontWeight.w500,
-    color: muted,
+    color: text,
     height: 1.2,
   );
 
+  // Detail rows (location, salary, etc.)
   static const TextStyle body = TextStyle(
-    fontSize: 12.5,
-    fontWeight: FontWeight.w400,   // lighter
-    color: muted,
+    fontSize: 13,
+    fontWeight: FontWeight.w400,
+    color: text,
     height: 1.3,
   );
 
+  // Muted metadata
   static const TextStyle sub = TextStyle(
-    fontSize: 11.5,
+    fontSize: 12,
     fontWeight: FontWeight.w400,
-    color: lightMuted,
+    color: muted,
     height: 1.2,
   );
 
-  static const TextStyle link = TextStyle(
-    fontSize: 12.5,
-    fontWeight: FontWeight.w500,
-    color: primary,
-    height: 1.2,
-  );
-
-  // ============================================================
-  // CARD DECORATION (FLAT – NO HEAVY SHADOW)
-  // ============================================================
-
-  static BoxDecoration cardDecoration({
-    double radius = 12,
-  }) {
-    return BoxDecoration(
-      color: card,
-      borderRadius: BorderRadius.circular(radius),
-      border: Border.all(color: border),
-    );
-  }
-
-  // ============================================================
-  // TAG STYLE (LIGHT ORANGE – SLIM)
-  // ============================================================
-
-  static BoxDecoration tagDecoration() {
-    return BoxDecoration(
-      color: tagBg,
-      borderRadius: BorderRadius.circular(999),
-      border: Border.all(color: tagBorder),
-    );
-  }
-
+  // Tag text
   static const TextStyle tagTextStyle = TextStyle(
-    fontSize: 10.5,
+    fontSize: 11.5,
     fontWeight: FontWeight.w500,
     color: tagText,
   );
 
-  // ============================================================
-  // THEME (MINIMAL)
-  // ============================================================
+  // ================= DECORATIONS =================
+
+  static BoxDecoration cardDecoration() {
+    return BoxDecoration(
+      color: card,
+      borderRadius: r12,
+      border: Border.all(color: border, width: 0.6),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.025),
+          blurRadius: 12,
+          offset: const Offset(0, 6),
+        ),
+      ],
+    );
+  }
+
+  static BoxDecoration tagDecoration() {
+    return BoxDecoration(
+      color: tagBg,
+      borderRadius: BorderRadius.circular(20),
+    );
+  }
+
+  // ================= THEME =================
 
   static ThemeData theme() {
     return ThemeData(
