@@ -19,54 +19,79 @@ class EmployerDashboardService {
 
   /// Returns organizations where current user is an active member.
   /// This is the ONLY source of truth for employer -> organization relationship.
+  ///
+  /// IMPORTANT:
+  /// We intentionally do NOT join companies(...) inside this query,
+  /// because badly written RLS policies can cause infinite recursion.
   Future<List<Map<String, dynamic>>> fetchMyOrganizations() async {
     final user = _requireUser();
 
-    final res = await _db
+    // 1) load memberships only (no join)
+    final membersRes = await _db
         .from('company_members')
-        .select('''
-          company_id,
-          role,
-          status,
-          joined_at,
-          companies (
-            id,
-            name,
-            logo_url,
-            is_verified,
-            headquarters_city,
-            headquarters_state,
-            industry,
-            company_size,
-            website,
-            description,
-            rating,
-            total_reviews,
-            created_at
-          )
-        ''')
+        .select('company_id, role, status, joined_at')
         .eq('user_id', user.id)
         .eq('status', 'active')
         .order('joined_at', ascending: false);
 
-    final rows = List<Map<String, dynamic>>.from(res);
+    final members = List<Map<String, dynamic>>.from(membersRes);
 
+    final companyIds = members
+        .map((m) => (m['company_id'] ?? '').toString().trim())
+        .where((x) => x.isNotEmpty)
+        .toSet()
+        .toList();
+
+    if (companyIds.isEmpty) return [];
+
+    // 2) load companies in a separate query
+    final companiesRes = await _db
+        .from('companies')
+        .select('''
+          id,
+          name,
+          logo_url,
+          is_verified,
+          headquarters_city,
+          headquarters_state,
+          industry,
+          company_size,
+          website,
+          description,
+          rating,
+          total_reviews,
+          created_at
+        ''')
+        .inFilter('id', companyIds);
+
+    final companies = List<Map<String, dynamic>>.from(companiesRes);
+
+    // map id -> company
+    final Map<String, Map<String, dynamic>> companyMap = {};
+    for (final c in companies) {
+      final id = (c['id'] ?? '').toString().trim();
+      if (id.isEmpty) continue;
+      companyMap[id] = c;
+    }
+
+    // merge membership + company
     final List<Map<String, dynamic>> orgs = [];
 
-    for (final r in rows) {
-      final c = r['companies'];
-      if (c == null || c is! Map) continue;
+    for (final m in members) {
+      final cid = (m['company_id'] ?? '').toString().trim();
+      if (cid.isEmpty) continue;
 
-      final id = (c['id'] ?? '').toString();
-      final name = (c['name'] ?? '').toString();
+      final c = companyMap[cid];
+      if (c == null) continue;
 
-      if (id.trim().isEmpty || name.trim().isEmpty) continue;
+      final name = (c['name'] ?? '').toString().trim();
+      if (name.isEmpty) continue;
 
       orgs.add({
-        ...Map<String, dynamic>.from(c as Map),
-        'my_role': (r['role'] ?? 'member').toString(),
-        'my_status': (r['status'] ?? 'active').toString(),
-        'my_joined_at': r['joined_at'],
+        ...Map<String, dynamic>.from(c),
+        'my_role': (m['role'] ?? 'member').toString(),
+        'my_status': (m['status'] ?? 'active').toString(),
+        'my_joined_at': m['joined_at'],
       });
     }
 
@@ -175,12 +200,12 @@ class EmployerDashboardService {
         .from('companies')
         .insert({
           'name': n,
-          'industry': bt, // DB column
-          'headquarters_city': dist, // using district
+          'industry': bt,
+          'headquarters_city': dist,
           'headquarters_state': 'Assam',
           'website': website.trim().isEmpty ? null : website.trim(),
           'description': description.trim().isEmpty ? null : description.trim(),
-          'created_by': user.id, // REQUIRED by your DB
+          'created_by': user.id,
         })
         .select('id')
         .single();
@@ -189,10 +214,13 @@ class EmployerDashboardService {
     if (companyId.isEmpty) throw Exception("Failed to create organization");
 
     // 2) make current employer an active member
+    //
+    // NOTE:
+    // If your RLS policy is wrong, this insert can fail.
     await _db.from('company_members').insert({
       'company_id': companyId,
       'user_id': user.id,
-      'role': 'member', // your rule: only member, can do everything
+      'role': 'member',
       'status': 'active',
     });
 
@@ -639,9 +667,7 @@ class EmployerDashboardService {
   }
 
   // ============================================================
-  // ============================================================
   // BACKWARD COMPATIBILITY METHODS (USED BY YOUR UI)
-  // ============================================================
   // ============================================================
 
   /// Your CompanyDashboard calls this:
@@ -658,22 +684,12 @@ class EmployerDashboardService {
     return await fetchCompanyDashboardStats(companyId: orgId);
   }
 
-  /// Your CompanyDashboard calls this:
-  /// _service.fetchRecentApplicants(limit: 6)
-  Future<List<Map<String, dynamic>>> fetchRecentApplicantsCompat({
+  /// Your UI uses fetchRecentApplicants(limit: 6) WITHOUT companyId.
+  Future<List<Map<String, dynamic>>> fetchRecentApplicantsUI({
     int limit = 6,
   }) async {
     final orgId = await resolveDefaultOrganizationId();
     return await fetchRecentApplicants(companyId: orgId, limit: limit);
-  }
-
-  /// IMPORTANT:
-  /// Your UI uses fetchRecentApplicants(limit: 6) WITHOUT companyId.
-  /// So we provide an overload-style alias name.
-  Future<List<Map<String, dynamic>>> fetchRecentApplicantsUI({
-    int limit = 6,
-  }) async {
-    return await fetchRecentApplicantsCompat(limit: limit);
   }
 
   /// Your CompanyDashboard calls:
