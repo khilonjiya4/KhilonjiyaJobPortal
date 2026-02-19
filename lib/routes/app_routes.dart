@@ -28,6 +28,7 @@ import '../presentation/home_marketplace_feed/settings/language_settings_page.da
 
 // EMPLOYER
 import '../presentation/company/dashboard/company_dashboard.dart';
+import '../presentation/company/dashboard/create_organization_screen.dart';
 import '../presentation/company/jobs/create_job_screen.dart';
 import '../presentation/company/jobs/employer_job_list_screen.dart';
 import '../presentation/company/jobs/job_applicants_screen.dart';
@@ -90,6 +91,10 @@ class AppRoutes {
   // EMPLOYER
   // ------------------------------------------------------------
   static const String companyDashboard = '/company-dashboard';
+
+  // NEW: CREATE ORGANIZATION
+  static const String createOrganization = '/create-organization';
+
   static const String employerJobs = '/employer-jobs';
   static const String createJob = '/create-job';
 
@@ -137,6 +142,7 @@ class AppRoutes {
 
     // employer
     companyDashboard: (_) => const CompanyDashboard(),
+    createOrganization: (_) => const CreateOrganizationScreen(),
     employerJobs: (_) => const EmployerJobListScreen(),
     createJob: (_) => const CreateJobScreen(),
 
