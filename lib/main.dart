@@ -1,5 +1,3 @@
-// File: lib/main.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -23,26 +21,19 @@ Future<void> main() async {
 
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
-  // Load env
   try {
     await dotenv.load(fileName: '.env');
-  } catch (_) {
-    // silent fallback
-  }
+  } catch (_) {}
 
-  // Init Supabase only if config exists
   if (AppConfig.hasSupabase) {
     try {
       await Supabase.initialize(
         url: AppConfig.supabaseUrl,
         anonKey: AppConfig.supabaseAnonKey,
       );
-    } catch (_) {
-      // silent fallback
-    }
+    } catch (_) {}
   }
 
-  // System UI
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -67,16 +58,9 @@ class MyApp extends StatelessWidget {
         navigatorKey: NavigationService.navigatorKey,
         theme: KhilonjiyaUI.theme(),
         themeMode: ThemeMode.light,
-
-        // Always start from splash/initializer
         home: const AppInitializer(),
-
-        // Static routes
         routes: AppRoutes.routes,
-
-        // Dynamic routes
         onGenerateRoute: AppRoutes.onGenerateRoute,
-
         builder: (context, child) => MediaQuery(
           data: MediaQuery.of(context)
               .copyWith(textScaler: const TextScaler.linear(1.0)),
@@ -90,7 +74,9 @@ class MyApp extends StatelessWidget {
 /// ------------------------------------------------------------
 /// AppInitializer
 /// - Shows splash for MINIMUM 3 seconds
-/// - Then routes based on session
+/// - Routes directly to:
+///     Logged in -> Home
+///     Not logged in -> JobSeekerLogin
 /// ------------------------------------------------------------
 class AppInitializer extends StatefulWidget {
   const AppInitializer({super.key});
@@ -117,19 +103,16 @@ class _AppInitializerState extends State<AppInitializer> {
     try {
       setState(() => _loadingText = "Starting...");
 
-      // 1) If Supabase config missing -> go role selection
       if (!AppConfig.hasSupabase) {
         await _waitSplash(start);
-        _go(AppRoutes.roleSelection);
+        _go(AppRoutes.jobSeekerLogin);
         return;
       }
 
       final client = Supabase.instance.client;
-
       final session = client.auth.currentSession;
       final user = client.auth.currentUser;
 
-      // 2) If logged in -> go HomeRouter (role-based)
       if (session != null && user != null) {
         setState(() => _loadingText = "Welcome back...");
         await _waitSplash(start);
@@ -137,13 +120,12 @@ class _AppInitializerState extends State<AppInitializer> {
         return;
       }
 
-      // 3) Not logged in -> go role selection
       setState(() => _loadingText = "Loading...");
       await _waitSplash(start);
-      _go(AppRoutes.roleSelection);
+      _go(AppRoutes.jobSeekerLogin);
     } catch (_) {
       await _waitSplash(start);
-      _go(AppRoutes.roleSelection);
+      _go(AppRoutes.jobSeekerLogin);
     }
   }
 
