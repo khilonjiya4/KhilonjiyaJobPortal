@@ -19,7 +19,7 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
   bool _loading = true;
   bool _saving = false;
 
-  // master dropdown data
+  // masters
   List<Map<String, dynamic>> _districts = [];
   List<Map<String, dynamic>> _businessTypes = [];
 
@@ -28,8 +28,8 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
   final TextEditingController _website = TextEditingController();
   final TextEditingController _desc = TextEditingController();
 
-  String? _selectedDistrict;
-  String? _selectedBusinessType;
+  String? _selectedDistrictId; // UUID
+  String? _selectedBusinessTypeId; // UUID
 
   // UI
   static const Color _bg = Color(0xFFF7F8FA);
@@ -64,12 +64,19 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  Map<String, dynamic> _asMap(dynamic v) {
+    if (v == null) return {};
+    if (v is Map<String, dynamic>) return v;
+    if (v is Map) return Map<String, dynamic>.from(v);
+    return {};
+  }
+
   Future<void> _loadMasters() async {
     if (!mounted) return;
     setState(() => _loading = true);
 
     try {
-      // districts (REAL TABLE)
+      // DISTRICTS (REAL TABLE)
       final dRes = await _db
           .from('assam_districts_master')
           .select('id, district_name')
@@ -77,10 +84,10 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
 
       _districts = List<Map<String, dynamic>>.from(dRes);
 
-      // business types (REAL TABLE)
+      // BUSINESS TYPES (REAL TABLE)
       final bRes = await _db
           .from('business_types_master')
-          .select('id, type_name')
+          .select('id, type_name, is_active')
           .eq('is_active', true)
           .order('type_name', ascending: true);
 
@@ -107,12 +114,12 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
       return;
     }
 
-    if ((_selectedBusinessType ?? '').trim().isEmpty) {
+    if ((_selectedBusinessTypeId ?? '').trim().isEmpty) {
       _toast("Business type required");
       return;
     }
 
-    if ((_selectedDistrict ?? '').trim().isEmpty) {
+    if ((_selectedDistrictId ?? '').trim().isEmpty) {
       _toast("District required");
       return;
     }
@@ -121,20 +128,17 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
     setState(() => _saving = true);
 
     try {
-      // Create organization
       await _service.createOrganization(
         name: name,
-        businessType: _selectedBusinessType!,
-        district: _selectedDistrict!,
+        businessTypeId: _selectedBusinessTypeId!,
+        districtId: _selectedDistrictId!,
         website: _website.text.trim(),
         description: _desc.text.trim(),
       );
 
       if (!mounted) return;
 
-      // Return to dashboard and let it reload.
       Navigator.pop(context, true);
-
       _toast("Organization created");
     } catch (e) {
       _toast("Failed: $e");
@@ -192,28 +196,45 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
 
                     _label("Business type *"),
                     const SizedBox(height: 8),
-                    _dropdown(
-                      value: _selectedBusinessType,
+                    _dropdownId(
+                      valueId: _selectedBusinessTypeId,
                       hint: "Select business type",
                       items: _businessTypes
-                          .map((e) => (e['type_name'] ?? '').toString())
-                          .where((x) => x.trim().isNotEmpty)
+                          .map((e) => {
+                                'id': (e['id'] ?? '').toString(),
+                                'label': (e['type_name'] ?? '').toString(),
+                              })
+                          .where((x) =>
+                              (x['id'] ?? '').toString().trim().isNotEmpty &&
+                              (x['label'] ?? '')
+                                  .toString()
+                                  .trim()
+                                  .isNotEmpty)
                           .toList(),
-                      onChanged: (v) =>
-                          setState(() => _selectedBusinessType = v),
+                      onChangedId: (id) =>
+                          setState(() => _selectedBusinessTypeId = id),
                     ),
                     const SizedBox(height: 14),
 
                     _label("District *"),
                     const SizedBox(height: 8),
-                    _dropdown(
-                      value: _selectedDistrict,
+                    _dropdownId(
+                      valueId: _selectedDistrictId,
                       hint: "Select district",
                       items: _districts
-                          .map((e) => (e['district_name'] ?? '').toString())
-                          .where((x) => x.trim().isNotEmpty)
+                          .map((e) => {
+                                'id': (e['id'] ?? '').toString(),
+                                'label': (e['district_name'] ?? '').toString(),
+                              })
+                          .where((x) =>
+                              (x['id'] ?? '').toString().trim().isNotEmpty &&
+                              (x['label'] ?? '')
+                                  .toString()
+                                  .trim()
+                                  .isNotEmpty)
                           .toList(),
-                      onChanged: (v) => setState(() => _selectedDistrict = v),
+                      onChangedId: (id) =>
+                          setState(() => _selectedDistrictId = id),
                     ),
                     const SizedBox(height: 14),
 
@@ -347,12 +368,21 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
     );
   }
 
-  Widget _dropdown({
-    required String? value,
+  Widget _dropdownId({
+    required String? valueId,
     required String hint,
-    required List<String> items,
-    required ValueChanged<String?> onChanged,
+    required List<Map<String, String>> items,
+    required ValueChanged<String?> onChangedId,
   }) {
+    String? currentLabel;
+
+    for (final it in items) {
+      if ((it['id'] ?? '') == (valueId ?? '')) {
+        currentLabel = it['label'];
+        break;
+      }
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(
@@ -362,13 +392,18 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          value: value,
+          value: valueId,
           isExpanded: true,
           hint: Text(hint),
           items: items
-              .map((x) => DropdownMenuItem(value: x, child: Text(x)))
+              .map(
+                (x) => DropdownMenuItem(
+                  value: x['id'],
+                  child: Text(x['label'] ?? ''),
+                ),
+              )
               .toList(),
-          onChanged: onChanged,
+          onChanged: onChangedId,
         ),
       ),
     );
