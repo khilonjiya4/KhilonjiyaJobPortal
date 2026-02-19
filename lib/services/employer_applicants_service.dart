@@ -1,3 +1,4 @@
+// lib/services/employer_applicants_service.dart
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -14,14 +15,10 @@ class EmployerApplicantsService {
   // ACCESS CONTROL (REAL)
   //
   // Rule:
-  // - Job belongs to an organization (company_id)
-  // - Any ACTIVE member of that organization can manage applicants
-  //
-  // IMPORTANT:
-  // We keep the method name as ensureJobOwnerAndGetJob()
-  // because your UI screens already call this.
+  // - A job belongs to an organization (company_id)
+  // - Any active member of that organization can manage applicants
   // ------------------------------------------------------------
-  Future<Map<String, dynamic>> ensureJobOwnerAndGetJob(String jobId) async {
+  Future<Map<String, dynamic>> ensureCanAccessJobAndGetJob(String jobId) async {
     final user = _requireUser();
 
     final job = await _db
@@ -37,7 +34,7 @@ class EmployerApplicantsService {
       throw Exception("This job is not linked to any organization.");
     }
 
-    // Must be active member of that organization
+    // Must be active member of that company
     final member = await _db
         .from('company_members')
         .select('id, status')
@@ -79,7 +76,7 @@ class EmployerApplicantsService {
   // ------------------------------------------------------------
   Future<List<Map<String, dynamic>>> fetchApplicantsForJob(String jobId) async {
     _requireUser();
-    await ensureJobOwnerAndGetJob(jobId);
+    await ensureCanAccessJobAndGetJob(jobId);
 
     final res = await _db
         .from('job_applications_listings')
@@ -92,7 +89,6 @@ class EmployerApplicantsService {
           employer_notes,
           interview_date,
           user_id,
-          pipeline_stage_id,
 
           job_applications (
             id,
@@ -132,8 +128,9 @@ class EmployerApplicantsService {
     required String jobId,
   }) async {
     final user = _requireUser();
-    await ensureJobOwnerAndGetJob(jobId);
+    await ensureCanAccessJobAndGetJob(jobId);
 
+    // Only upgrade applied -> viewed
     final row = await _db
         .from('job_applications_listings')
         .select('id, application_status')
@@ -170,7 +167,7 @@ class EmployerApplicantsService {
     String? note,
   }) async {
     final user = _requireUser();
-    await ensureJobOwnerAndGetJob(jobId);
+    await ensureCanAccessJobAndGetJob(jobId);
 
     final s = status.trim().toLowerCase();
     const allowed = {
@@ -217,13 +214,14 @@ class EmployerApplicantsService {
     String? notes,
   }) async {
     final user = _requireUser();
-    final job = await ensureJobOwnerAndGetJob(jobId);
+    final job = await ensureCanAccessJobAndGetJob(jobId);
 
     final jobCompanyId = (job['company_id'] ?? '').toString().trim();
     if (jobCompanyId.isEmpty) {
       throw Exception("Job has no organization linked.");
     }
 
+    // safety: prevent scheduling under wrong org id
     if (companyId.trim() != jobCompanyId) {
       throw Exception("Organization mismatch for this job.");
     }
@@ -267,7 +265,7 @@ class EmployerApplicantsService {
     required String notes,
   }) async {
     final user = _requireUser();
-    await ensureJobOwnerAndGetJob(jobId);
+    await ensureCanAccessJobAndGetJob(jobId);
 
     await _db.from('job_applications_listings').update({
       'employer_notes': notes.trim(),
@@ -285,8 +283,7 @@ class EmployerApplicantsService {
   }
 
   // ------------------------------------------------------------
-  // PIPELINE STAGE (REAL)
-  // Uses job_applications_listings.pipeline_stage_id
+  // PIPELINE STAGE (WORKAROUND)
   // ------------------------------------------------------------
   Future<void> moveApplicantToStage({
     required String listingRowId,
@@ -295,13 +292,29 @@ class EmployerApplicantsService {
     String? note,
   }) async {
     final user = _requireUser();
-    await ensureJobOwnerAndGetJob(jobId);
+    await ensureCanAccessJobAndGetJob(jobId);
+
+    final row = await _db
+        .from('job_applications_listings')
+        .select('id, employer_notes')
+        .eq('id', listingRowId)
+        .maybeSingle();
+
+    if (row == null) throw Exception("Application row not found");
+
+    final existingNotes = (row['employer_notes'] ?? '').toString().trim();
+
+    final newNotes = _mergeNotes(
+      existingNotes: existingNotes,
+      stageId: toStageId,
+      note: note,
+    );
 
     await _db.from('job_applications_listings').update({
-      'pipeline_stage_id': toStageId,
-      if ((note ?? '').trim().isNotEmpty) 'employer_notes': note!.trim(),
+      'employer_notes': newNotes,
     }).eq('id', listingRowId);
 
+    // stage history
     try {
       await _db.from('application_stage_history').insert({
         'job_application_listing_id': listingRowId,
@@ -313,6 +326,7 @@ class EmployerApplicantsService {
       if (kDebugMode) debugPrint("stage_history insert failed: $e");
     }
 
+    // event
     try {
       await _db.from('application_events').insert({
         'job_application_listing_id': listingRowId,
@@ -324,8 +338,27 @@ class EmployerApplicantsService {
     } catch (_) {}
   }
 
-  String extractStageId(dynamic pipelineStageId) {
-    if (pipelineStageId == null) return '';
-    return pipelineStageId.toString().trim();
+  String _mergeNotes({
+    required String existingNotes,
+    required String stageId,
+    String? note,
+  }) {
+    String cleaned = existingNotes;
+    cleaned = cleaned.replaceAll(RegExp(r'\[pipeline_stage_id:.*?\]\s*'), '');
+
+    final tag = '[pipeline_stage_id:$stageId]';
+    final extra = (note ?? '').trim();
+
+    if (extra.isEmpty) return '$tag\n$cleaned'.trim();
+    return '$tag\n$cleaned\n\n$extra'.trim();
+  }
+
+  String extractStageId(dynamic employerNotes) {
+    if (employerNotes == null) return '';
+    final s = employerNotes.toString();
+
+    final m = RegExp(r'\[pipeline_stage_id:(.*?)\]').firstMatch(s);
+    if (m == null) return '';
+    return (m.group(1) ?? '').trim();
   }
 }
