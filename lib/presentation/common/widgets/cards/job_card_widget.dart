@@ -9,134 +9,108 @@ class JobCardWidget extends StatelessWidget {
   final VoidCallback onTap;
 
   const JobCardWidget({
-    Key? key,
+    super.key,
     required this.job,
     required this.isSaved,
     required this.onSaveToggle,
     required this.onTap,
-  }) : super(key: key);
+  });
 
-  static const double _logoSize = 52;
-  static const double _businessLogoSize = 48;
+  static const double _companyLogoSize = 46;
+  static const double _businessIconSize = 52;
 
   @override
   Widget build(BuildContext context) {
-    final title =
-        (job['job_title'] ?? job['title'] ?? 'Job').toString().trim();
+    final title = (job['job_title'] ?? 'Job').toString().trim();
+    final company = (job['company_name'] ?? 'Company').toString().trim();
+    final location = (job['district'] ?? 'Location').toString().trim();
 
-    final companyMap = job['companies'];
-    final companyName = (companyMap is Map<String, dynamic>)
-        ? (companyMap['name'] ?? '').toString().trim()
-        : '';
+    final salary = _salaryText(
+      salaryMin: job['salary_min'],
+      salaryMax: job['salary_max'],
+    );
 
-    final company = companyName.isNotEmpty
-        ? companyName
-        : (job['company_name'] ?? 'Company').toString().trim();
+    final exp = _experience(job);
 
-    final location =
-        (job['district'] ?? job['location'] ?? 'Location').toString().trim();
-
-    final salaryMin = job['salary_min'];
-    final salaryMax = job['salary_max'];
-
-    final expText = _formatExperience(job);
-    final salaryText =
-        _salaryText(salaryMin: salaryMin, salaryMax: salaryMax);
-
-    final skills = _extractSkills(job);
     final postedAt = job['created_at']?.toString();
 
-    // Company logo
-    String? companyLogoUrl;
-    if (companyMap is Map<String, dynamic>) {
-      final url = (companyMap['logo_url'] ?? '').toString().trim();
-      if (url.isNotEmpty) companyLogoUrl = url;
-    }
+    final companyLogoUrl =
+        (job['companies']?['logo_url'] ?? '').toString().trim();
 
-    // Business type logo
-    String? businessIconUrl;
-    if (companyMap is Map<String, dynamic>) {
-      final bt = companyMap['business_types_master'];
-      if (bt is Map<String, dynamic>) {
-        final url = (bt['logo_url'] ?? '').toString().trim();
-        if (url.isNotEmpty) businessIconUrl = url;
-      }
-    }
+    final businessIconUrl =
+        (job['companies']?['business_types_master']?['logo_url'] ?? '')
+            .toString()
+            .trim();
+
+    final skills = _extractSkills(job);
 
     return InkWell(
       onTap: onTap,
-      borderRadius: KhilonjiyaUI.r16,
+      borderRadius: KhilonjiyaUI.r12,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: KhilonjiyaUI.r16,
-          border: Border.all(color: KhilonjiyaUI.border),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(12),
+        decoration: KhilonjiyaUI.cardDecoration(),
         child: Stack(
           children: [
-            // BUSINESS TYPE LOGO (center right)
-            Positioned(
-              right: 0,
-              top: 0,
-              bottom: 0,
-              child: Center(
-                child: _BusinessTypeIcon(
+            // RIGHT CENTER BUSINESS ICON
+            Positioned.fill(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: _BusinessIcon(
                   iconUrl: businessIconUrl,
-                  size: _businessLogoSize,
+                  size: _businessIconSize,
                 ),
               ),
             ),
 
-            // MAIN CONTENT
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // TOP ROW (Logo + Title + Bookmark)
+                // HEADER ROW
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _CompanyLogo(
-                      companyName: company,
+                      name: company,
                       logoUrl: companyLogoUrl,
-                      size: _logoSize,
+                      size: _companyLogoSize,
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
+
                     Expanded(
-                      child: Text(
-                        title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500, // slim
-                          height: 1.15,
-                          color: Color(0xFF0F172A),
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: KhilonjiyaUI.cardTitle,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            company,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: KhilonjiyaUI.company,
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 8),
+
                     InkWell(
                       onTap: onSaveToggle,
-                      borderRadius: BorderRadius.circular(999),
                       child: Padding(
                         padding: const EdgeInsets.all(4),
                         child: Icon(
                           isSaved
-                              ? Icons.bookmark_rounded
-                              : Icons.bookmark_outline,
+                              ? Icons.bookmark
+                              : Icons.bookmark_border,
                           size: 22,
                           color: isSaved
                               ? KhilonjiyaUI.primary
-                              : const Color(0xFF94A3B8),
+                              : KhilonjiyaUI.muted,
                         ),
                       ),
                     ),
@@ -145,42 +119,39 @@ class JobCardWidget extends StatelessWidget {
 
                 const SizedBox(height: 10),
 
-                // Everything below is full width (NO GAP)
-                Text(
-                  company,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w400,
-                    color: Color(0xFF334155),
-                  ),
-                ),
-
-                const SizedBox(height: 8),
-                _plainRow(Icons.location_on_rounded, location),
+                _infoRow(Icons.location_on_outlined, location),
                 const SizedBox(height: 6),
-                _plainRow(Icons.work_rounded, expText),
+                _infoRow(Icons.work_outline, exp),
                 const SizedBox(height: 6),
-                _plainRow(Icons.currency_rupee_rounded, salaryText),
+                _infoRow(Icons.currency_rupee, salary),
 
                 if (skills.isNotEmpty) ...[
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children:
-                        skills.take(6).map((s) => _orangeTag(s)).toList(),
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: skills
+                        .take(4)
+                        .map(
+                          (e) => Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 5),
+                            decoration: KhilonjiyaUI.tagDecoration(),
+                            child: Text(
+                              e,
+                              style: KhilonjiyaUI.tagTextStyle,
+                            ),
+                          ),
+                        )
+                        .toList(),
                   ),
                 ],
 
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
 
                 Text(
                   _postedAgo(postedAt),
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w400,
-                    color: Color(0xFF94A3B8),
-                  ),
+                  style: KhilonjiyaUI.sub,
                 ),
               ],
             ),
@@ -190,65 +161,46 @@ class JobCardWidget extends StatelessWidget {
     );
   }
 
-  Widget _plainRow(IconData icon, String text) {
+  Widget _infoRow(IconData icon, String text) {
     return Row(
       children: [
-        Icon(icon, size: 16, color: const Color(0xFF64748B)),
-        const SizedBox(width: 8),
+        Icon(icon, size: 16, color: KhilonjiyaUI.muted),
+        const SizedBox(width: 6),
         Expanded(
           child: Text(
             text,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w400,
-              color: Color(0xFF0F172A),
-            ),
+            style: KhilonjiyaUI.body,
           ),
         ),
       ],
     );
   }
 
-  Widget _orangeTag(String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF4E6),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0xFFFFE0C2)),
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w400,
-          color: Color(0xFF9A3412),
-        ),
-      ),
-    );
+  String _salaryText({dynamic salaryMin, dynamic salaryMax}) {
+    int? toInt(v) {
+      if (v == null) return null;
+      if (v is int) return v;
+      return int.tryParse(v.toString());
+    }
+
+    final mn = toInt(salaryMin);
+    final mx = toInt(salaryMax);
+
+    if (mn == null && mx == null) return "Not disclosed";
+
+    if (mn != null && mx != null) {
+      return "$mn-$mx per month";
+    }
+    if (mn != null) return "$mn+ per month";
+    return "Up to $mx per month";
   }
 
-  // EXPERIENCE
-  String _formatExperience(Map<String, dynamic> job) {
-    final raw = (job['experience_required'] ??
-            job['experience_level'] ??
-            '')
-        .toString()
-        .trim();
-
-    if (raw.isNotEmpty) return raw;
-    return "Experience not specified";
-  }
-
-  // SALARY
-  String _salaryText({
-    required dynamic salaryMin,
-    required dynamic salaryMax,
-  }) {
-    if (salaryMin == null && salaryMax == null) return "Not disclosed";
-    return "$salaryMin-$salaryMax per month";
+  String _experience(Map<String, dynamic> job) {
+    final exp = (job['experience_required'] ?? '').toString();
+    if (exp.isEmpty) return "Experience not specified";
+    return exp;
   }
 
   List<String> _extractSkills(Map<String, dynamic> job) {
@@ -257,14 +209,15 @@ class JobCardWidget extends StatelessWidget {
     if (raw is List) {
       return raw.map((e) => e.toString()).toList();
     }
-    return raw.toString().split(',');
+    return raw.toString().split(',').map((e) => e.trim()).toList();
   }
 
   String _postedAgo(String? date) {
-    if (date == null) return 'Recently';
+    if (date == null) return '';
     final d = DateTime.tryParse(date);
-    if (d == null) return 'Recently';
+    if (d == null) return '';
     final diff = DateTime.now().difference(d);
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
   }
@@ -275,102 +228,91 @@ class JobCardWidget extends StatelessWidget {
 // ============================================================
 
 class _CompanyLogo extends StatelessWidget {
-  final String companyName;
-  final String? logoUrl;
+  final String name;
+  final String logoUrl;
   final double size;
 
   const _CompanyLogo({
-    required this.companyName,
+    required this.name,
     required this.logoUrl,
     required this.size,
   });
 
-  Color _randomColor(String seed) {
-    final colors = [
-      const Color(0xFFE0F2FE),
-      const Color(0xFFFFEDD5),
-      const Color(0xFFDCFCE7),
-      const Color(0xFFFCE7F3),
-      const Color(0xFFEDE9FE),
-    ];
-    return colors[seed.hashCode.abs() % colors.length];
-  }
-
   @override
   Widget build(BuildContext context) {
-    final letter =
-        companyName.isNotEmpty ? companyName[0].toUpperCase() : "C";
+    final letter = name.isNotEmpty ? name[0].toUpperCase() : "C";
+
+    final colors = [
+      const Color(0xFFE0F2FE),
+      const Color(0xFFFCE7F3),
+      const Color(0xFFEDE9FE),
+      const Color(0xFFDCFCE7),
+      const Color(0xFFFFEDD5),
+    ];
+
+    final bg = colors[Random().nextInt(colors.length)];
 
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: _randomColor(companyName),
-        borderRadius: BorderRadius.circular(14),
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
       ),
       clipBehavior: Clip.antiAlias,
-      child: (logoUrl == null || logoUrl!.isEmpty)
+      child: logoUrl.isEmpty
           ? Center(
               child: Text(
                 letter,
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w500,
-                  color: Color(0xFF0F172A),
+                style: TextStyle(
+                  fontSize: size * 0.45,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
                 ),
               ),
             )
           : Image.network(
-              logoUrl!,
+              logoUrl,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) {
-                return Center(
-                  child: Text(
-                    letter,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w500,
-                      color: Color(0xFF0F172A),
-                    ),
+              errorBuilder: (_, __, ___) => Center(
+                child: Text(
+                  letter,
+                  style: TextStyle(
+                    fontSize: size * 0.45,
+                    fontWeight: FontWeight.w600,
                   ),
-                );
-              },
+                ),
+              ),
             ),
     );
   }
 }
 
 // ============================================================
-// BUSINESS TYPE ICON
+// BUSINESS ICON
 // ============================================================
 
-class _BusinessTypeIcon extends StatelessWidget {
-  final String? iconUrl;
+class _BusinessIcon extends StatelessWidget {
+  final String iconUrl;
   final double size;
 
-  const _BusinessTypeIcon({
+  const _BusinessIcon({
     required this.iconUrl,
     required this.size,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (iconUrl == null || iconUrl!.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: KhilonjiyaUI.border),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Image.network(
-        iconUrl!,
-        fit: BoxFit.cover,
-      ),
+    return Opacity(
+      opacity: 0.15,
+      child: iconUrl.isEmpty
+          ? const SizedBox()
+          : Image.network(
+              iconUrl,
+              width: size,
+              height: size,
+              fit: BoxFit.contain,
+            ),
     );
   }
 }
