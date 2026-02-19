@@ -126,6 +126,62 @@ class EmployerDashboardService {
     return Map<String, dynamic>.from(company);
   }
 
+  /// Dashboard uses this (your UI already calls it)
+  Future<Map<String, dynamic>> resolveMyCompany() async {
+    final companyId = await resolveDefaultCompanyId();
+    return await fetchCompanyById(companyId: companyId);
+  }
+
+  // ------------------------------------------------------------
+  // CREATE ORGANIZATION (REAL)
+  // ------------------------------------------------------------
+  Future<String> createOrganization({
+    required String name,
+    required String businessType,
+    required String district,
+    String website = '',
+    String description = '',
+  }) async {
+    final user = _requireUser();
+
+    final n = name.trim();
+    if (n.isEmpty) throw Exception("Organization name required");
+
+    final bt = businessType.trim();
+    if (bt.isEmpty) throw Exception("Business type required");
+
+    final dist = district.trim();
+    if (dist.isEmpty) throw Exception("District required");
+
+    // 1) create company
+    final inserted = await _db
+        .from('companies')
+        .insert({
+          'name': n,
+          'industry': bt, // your DB column is industry
+          'headquarters_city': dist,
+          'headquarters_state': 'Assam',
+          'website': website.trim().isEmpty ? null : website.trim(),
+          'description': description.trim().isEmpty ? null : description.trim(),
+          'created_by': user.id, // REQUIRED in your DB
+        })
+        .select('id')
+        .single();
+
+    final companyId = (inserted['id'] ?? '').toString().trim();
+    if (companyId.isEmpty) throw Exception("Failed to create organization");
+
+    // 2) make current employer a member
+    await _db.from('company_members').insert({
+      'company_id': companyId,
+      'user_id': user.id,
+      'role': 'admin',
+      'status': 'active',
+    });
+
+    return companyId;
+  }
+
   // ------------------------------------------------------------
   // JOBS (COMPANY BASED, NOT EMPLOYER BASED)
   // ------------------------------------------------------------
