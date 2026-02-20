@@ -30,11 +30,8 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   DateTime? _expiresAt;
   int _daysLeft = 0;
 
-  // Prefill
   String _prefillEmail = "";
   String _prefillPhone = "";
-
-  // Needed for verification after Razorpay returns
   String? _transactionId;
 
   @override
@@ -51,9 +48,6 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     super.dispose();
   }
 
-  // ============================================================
-  // BOOTSTRAP
-  // ============================================================
   Future<void> _bootstrap() async {
     await _loadPrefill();
     await _loadSubscription();
@@ -63,7 +57,6 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     try {
       final db = Supabase.instance.client;
       final user = db.auth.currentUser;
-
       if (user == null) return;
 
       _prefillEmail = (user.email ?? "").trim();
@@ -75,36 +68,25 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
           .maybeSingle();
 
       if (profile != null) {
-        _prefillPhone = (profile['mobile_number'] ?? "").toString().trim();
+        _prefillPhone =
+            (profile['mobile_number'] ?? "").toString().trim();
       }
-    } catch (_) {
-      // ignore
-    }
+    } catch (_) {}
   }
 
-  // ============================================================
-  // INIT RAZORPAY
-  // ============================================================
   void _initRazorpay() {
     _razorpay = Razorpay();
-
     _razorpay!.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
     _razorpay!.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
     _razorpay!.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
   }
 
-  // ============================================================
-  // LOAD SUBSCRIPTION STATUS (ACTIVE / EXPIRED / NONE)
-  // ============================================================
   Future<void> _loadSubscription() async {
     if (!mounted) return;
-
     setState(() => _loading = true);
 
     try {
       final sub = await _subscriptionService.getMySubscription();
-
-      if (!mounted) return;
 
       if (sub == null) {
         setState(() {
@@ -147,8 +129,6 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         _loading = false;
       });
     } catch (_) {
-      if (!mounted) return;
-
       setState(() {
         _isActive = false;
         _isExpired = false;
@@ -159,18 +139,13 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     }
   }
 
-  // ============================================================
-  // START PAYMENT FLOW
-  // ============================================================
   Future<void> _startPayment() async {
     if (_paying) return;
-
     setState(() => _paying = true);
 
     try {
       _transactionId = null;
 
-      // 1) Create order from Supabase function
       final order = await _subscriptionService.createOrder(
         amountRupees: SubscriptionPage.price,
         planKey: "pro_monthly",
@@ -180,13 +155,12 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       final razorpayOrderId = order['order_id']?.toString();
 
       if (_transactionId == null || razorpayOrderId == null) {
-        throw Exception("Order creation returned invalid response");
+        throw Exception("Invalid order response");
       }
 
-      // 2) Open Razorpay checkout
       final options = {
         "key": "rzp_test_SGkM8xnibeJDru",
-        "amount": order['amount'], // in paise (99900)
+        "amount": order['amount'],
         "currency": "INR",
         "name": "Khilonjiya Pro",
         "description": "Pro subscription (30 days)",
@@ -195,97 +169,48 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
           "contact": _prefillPhone,
           "email": _prefillEmail,
         },
-        "method": {
-          "upi": true,
-          "card": true,
-          "netbanking": true,
-          "wallet": true,
-        }
       };
 
       _razorpay!.open(options);
     } catch (e) {
-      if (!mounted) return;
-
       setState(() => _paying = false);
-
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Payment start failed: $e")),
+        SnackBar(content: Text("Payment start failed")),
       );
     }
   }
 
-  // ============================================================
-  // RAZORPAY CALLBACKS
-  // ============================================================
-  Future<void> _onPaymentSuccess(PaymentSuccessResponse response) async {
+  Future<void> _onPaymentSuccess(
+      PaymentSuccessResponse response) async {
     try {
-      final txId = _transactionId;
-      final orderId = response.orderId;
-      final paymentId = response.paymentId;
-      final signature = response.signature;
-
-      if (txId == null ||
-          orderId == null ||
-          paymentId == null ||
-          signature == null) {
-        throw Exception("Missing Razorpay payment response fields");
-      }
-
-      // 3) Verify payment using Supabase function
       await _subscriptionService.verifyPayment(
-        transactionId: txId,
-        razorpayOrderId: orderId,
-        razorpayPaymentId: paymentId,
-        razorpaySignature: signature,
+        transactionId: _transactionId!,
+        razorpayOrderId: response.orderId!,
+        razorpayPaymentId: response.paymentId!,
+        razorpaySignature: response.signature!,
       );
 
-      if (!mounted) return;
-
-      // 4) Reload subscription status
       await _loadSubscription();
-
       setState(() => _paying = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Subscription Activated")),
       );
-    } catch (e) {
-      if (!mounted) return;
-
+    } catch (_) {
       setState(() => _paying = false);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Payment verification failed: $e")),
-      );
     }
   }
 
   void _onPaymentError(PaymentFailureResponse response) {
-    if (!mounted) return;
-
     setState(() => _paying = false);
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text("Payment failed: ${response.message ?? "Cancelled"}"),
-      ),
-    );
   }
 
-  void _onExternalWallet(ExternalWalletResponse response) {
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text("External wallet: ${response.walletName ?? ""}"),
-      ),
-    );
-  }
+  void _onExternalWallet(ExternalWalletResponse response) {}
 
   // ============================================================
   // UI
   // ============================================================
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -294,32 +219,28 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         elevation: 0,
         backgroundColor: Colors.white,
         foregroundColor: KhilonjiyaUI.text,
-        title: const Text(
+        title: Text(
           "Subscription",
-          style: TextStyle(fontWeight: FontWeight.w900),
+          style: KhilonjiyaUI.cardTitle,
         ),
-        centerTitle: false,
-        actions: [
-          IconButton(
-            onPressed: _loading ? null : _loadSubscription,
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+              padding:
+                  const EdgeInsets.fromLTRB(16, 16, 16, 24),
               children: [
                 _heroCard(),
-                const SizedBox(height: 16),
-                _featuresSection(),
                 const SizedBox(height: 18),
-                _faqSection(),
+                _featuresSection(),
               ],
             ),
     );
   }
+
+  // ============================================================
+  // HERO (Slim like Job Card)
+  // ============================================================
 
   Widget _heroCard() {
     final buttonText = _isActive
@@ -328,317 +249,146 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
     final subtitle = _isActive
         ? "Active • $_daysLeft days left"
-        : (_isExpired
-            ? "Expired • Renew now to activate Pro again"
-            : "Unlock premium job features designed to help you get more calls, more interviews, and better offers.");
+        : "Unlock premium features and increase visibility.";
 
     return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: KhilonjiyaUI.r16,
-        border: Border.all(color: KhilonjiyaUI.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
+      padding: const EdgeInsets.all(14),
+      decoration: KhilonjiyaUI.cardDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-            decoration: BoxDecoration(
-              color: _isActive
-                  ? Colors.green.withOpacity(0.10)
-                  : KhilonjiyaUI.primary.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: _isActive
-                    ? Colors.green.withOpacity(0.25)
-                    : KhilonjiyaUI.primary.withOpacity(0.12),
-              ),
-            ),
-            child: Text(
-              _isActive ? "SUBSCRIPTION ACTIVE" : "KHILONJIYA PRO",
-              style: KhilonjiyaUI.sub.copyWith(
-                fontSize: 12,
-                fontWeight: FontWeight.w900,
-                color: _isActive ? Colors.green : KhilonjiyaUI.primary,
-                letterSpacing: 0.4,
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 14),
-
           Text(
-            _isActive ? "You are a Pro user" : "Get hired faster",
-            style: KhilonjiyaUI.hTitle.copyWith(
-              fontSize: 20,
-              fontWeight: FontWeight.w900,
-            ),
+            "Khilonjiya Pro",
+            style: KhilonjiyaUI.cardTitle,
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           Text(
             subtitle,
-            style: KhilonjiyaUI.sub.copyWith(
-              fontSize: 13.2,
-              height: 1.35,
-              color: const Color(0xFF64748B),
-              fontWeight: FontWeight.w700,
-            ),
+            style: KhilonjiyaUI.sub,
           ),
-
-          const SizedBox(height: 18),
-
-          // Price Row
+          const SizedBox(height: 12),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
                 "₹${SubscriptionPage.price}",
-                style: KhilonjiyaUI.h1.copyWith(
-                  fontSize: 34,
-                  fontWeight: FontWeight.w900,
+                style: KhilonjiyaUI.cardTitle.copyWith(
+                  fontSize: 22,
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               Padding(
-                padding: const EdgeInsets.only(bottom: 6),
+                padding:
+                    const EdgeInsets.only(bottom: 2),
                 child: Text(
                   "/ 30 days",
-                  style: KhilonjiyaUI.sub.copyWith(
-                    fontSize: 14,
-                    color: const Color(0xFF64748B),
-                    fontWeight: FontWeight.w800,
-                  ),
+                  style: KhilonjiyaUI.sub,
                 ),
               ),
             ],
           ),
-
-          const SizedBox(height: 16),
-
-          // CTA
+          const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
-            height: 52,
+            height: 44,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor:
-                    _isActive ? const Color(0xFF16A34A) : KhilonjiyaUI.primary,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
+                    KhilonjiyaUI.primary,
                 elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(12),
+                ),
               ),
               onPressed: _paying ? null : _startPayment,
               child: _paying
                   ? const SizedBox(
-                      width: 22,
-                      height: 22,
+                      width: 18,
+                      height: 18,
                       child: CircularProgressIndicator(
-                        strokeWidth: 2.6,
+                        strokeWidth: 2,
                         color: Colors.white,
                       ),
                     )
                   : Text(
                       buttonText,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w900,
+                      style: KhilonjiyaUI.body.copyWith(
                         color: Colors.white,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
             ),
           ),
-
-          const SizedBox(height: 10),
-
-          Center(
-            child: Text(
-              "No hidden charges • Manual renewal",
-              style: KhilonjiyaUI.sub.copyWith(
-                fontSize: 12.2,
-                color: const Color(0xFF94A3B8),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
         ],
       ),
     );
   }
 
+  // ============================================================
+  // FEATURES (Slim Cards)
+  // ============================================================
+
   Widget _featuresSection() {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
       children: [
         Text(
           "What you get",
-          style: KhilonjiyaUI.hTitle.copyWith(
-            fontSize: 16,
-            fontWeight: FontWeight.w900,
-          ),
+          style: KhilonjiyaUI.cardTitle,
         ),
         const SizedBox(height: 10),
-        _featureCard(
-          icon: Icons.bolt_rounded,
-          title: "Priority applications",
-          subtitle:
-              "Your profile is shown higher to employers for faster callbacks.",
+        _featureTile(
+          Icons.bolt_rounded,
+          "Priority applications",
+          "Shown higher to employers.",
         ),
-        _featureCard(
-          icon: Icons.verified_rounded,
-          title: "Verified job access",
-          subtitle: "Get access to premium and verified employer listings.",
+        _featureTile(
+          Icons.verified_rounded,
+          "Verified job access",
+          "Access premium listings.",
         ),
-        _featureCard(
-          icon: Icons.support_agent_rounded,
-          title: "Job support assistance",
-          subtitle:
-              "Get help in finding suitable jobs based on your profile and skills.",
-        ),
-        _featureCard(
-          icon: Icons.lock_open_rounded,
-          title: "Unlock premium jobs",
-          subtitle: "Apply to exclusive jobs available only to Pro users.",
+        _featureTile(
+          Icons.lock_open_rounded,
+          "Unlock premium jobs",
+          "Exclusive jobs for Pro users.",
         ),
       ],
     );
   }
 
-  Widget _faqSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          "FAQs",
-          style: KhilonjiyaUI.hTitle.copyWith(
-            fontSize: 16,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-        const SizedBox(height: 10),
-        _faqTile(
-          title: "Is this subscription refundable?",
-          answer:
-              "Currently subscriptions are non-refundable. You can renew anytime after expiry.",
-        ),
-        _faqTile(
-          title: "Will I definitely get a job?",
-          answer:
-              "No service can guarantee a job. Pro increases visibility and improves your chances.",
-        ),
-        _faqTile(
-          title: "Can I cancel anytime?",
-          answer:
-              "Yes. Since this is manual renewal, your plan will simply expire after 30 days.",
-        ),
-      ],
-    );
-  }
-
-  // ------------------------------------------------------------
-  // UI HELPERS
-  // ------------------------------------------------------------
-  static Widget _featureCard({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-  }) {
+  Widget _featureTile(
+      IconData icon,
+      String title,
+      String subtitle) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: KhilonjiyaUI.r16,
-        border: Border.all(color: KhilonjiyaUI.border),
-      ),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: KhilonjiyaUI.cardDecoration(),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: KhilonjiyaUI.primary.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: KhilonjiyaUI.primary.withOpacity(0.12),
-              ),
-            ),
-            child: Icon(
-              icon,
-              color: KhilonjiyaUI.primary,
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: 12),
+          Icon(icon,
+              size: 20,
+              color: KhilonjiyaUI.primary),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment:
+                  CrossAxisAlignment.start,
               children: [
                 Text(
                   title,
                   style: KhilonjiyaUI.body.copyWith(
-                    fontSize: 14.2,
-                    fontWeight: FontWeight.w900,
-                    color: const Color(0xFF0F172A),
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   subtitle,
-                  style: KhilonjiyaUI.sub.copyWith(
-                    fontSize: 12.6,
-                    height: 1.35,
-                    color: const Color(0xFF64748B),
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: KhilonjiyaUI.sub,
                 ),
               ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static Widget _faqTile({
-    required String title,
-    required String answer,
-  }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: KhilonjiyaUI.r16,
-        border: Border.all(color: KhilonjiyaUI.border),
-      ),
-      child: ExpansionTile(
-        tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-        title: Text(
-          title,
-          style: KhilonjiyaUI.body.copyWith(
-            fontWeight: FontWeight.w900,
-            fontSize: 13.8,
-          ),
-        ),
-        children: [
-          Text(
-            answer,
-            style: KhilonjiyaUI.sub.copyWith(
-              fontSize: 12.8,
-              height: 1.4,
-              color: const Color(0xFF64748B),
-              fontWeight: FontWeight.w700,
             ),
           ),
         ],
