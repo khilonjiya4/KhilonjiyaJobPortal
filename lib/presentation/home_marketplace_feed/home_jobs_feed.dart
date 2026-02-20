@@ -19,9 +19,9 @@ import 'expected_salary_edit_page.dart';
 import 'jobs_by_salary_page.dart';
 import 'latest_jobs_page.dart';
 import 'jobs_nearby_page.dart';
-import 'jobs_posted_today_page.dart';
 import 'construction_services_home_page.dart';
 import 'profile_edit_page.dart';
+import 'jobs_posted_today_page.dart';
 import 'subscription_page.dart';
 import 'notifications_page.dart';
 
@@ -67,11 +67,12 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   bool _isLoadingProfile = true;
 
   // ---------------- SLIDER ----------------
+  final PageController _sliderController =
+      PageController(viewportFraction: 0.94);
+  Timer? _sliderTimer;
   List<Map<String, dynamic>> _sliderItems = [];
-  final PageController _bottomSliderController = PageController();
-  Timer? _bottomSliderTimer;
+  int _currentSliderIndex = 0;
 
-  // ---------------- SEARCH HINT ----------------
   final PageController _searchHintController = PageController();
   Timer? _searchHintTimer;
 
@@ -93,117 +94,59 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   void dispose() {
     _isDisposed = true;
     _searchHintTimer?.cancel();
-    _bottomSliderTimer?.cancel();
+    _sliderTimer?.cancel();
     _searchHintController.dispose();
-    _bottomSliderController.dispose();
+    _sliderController.dispose();
     super.dispose();
   }
 
-  // ------------------------------------------------------------
-  // INIT
-  // ------------------------------------------------------------
   Future<void> _initialize() async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) {
+        _redirectToStart();
+        return;
+      }
+      await _loadInitialData();
+      _startSearchHintAutoSlide();
+    } catch (_) {
       _redirectToStart();
-      return;
     }
-
-    await _loadInitialData();
-    _startSearchHintAutoSlide();
-    _startBottomSlider();
-  }
-
-  void _startSearchHintAutoSlide() {
-    _searchHintTimer?.cancel();
-    _searchHintTimer =
-        Timer.periodic(const Duration(seconds: 2), (_) {
-      if (_isDisposed) return;
-      if (!_searchHintController.hasClients) return;
-
-      final next =
-          (_searchHintController.page?.round() ?? 0) + 1;
-
-      _searchHintController.animateToPage(
-        next % _searchHints.length,
-        duration: const Duration(milliseconds: 450),
-        curve: Curves.easeOut,
-      );
-    });
-  }
-
-  void _startBottomSlider() {
-    _bottomSliderTimer?.cancel();
-    _bottomSliderTimer =
-        Timer.periodic(const Duration(seconds: 4), (_) {
-      if (_isDisposed) return;
-      if (!_bottomSliderController.hasClients) return;
-      if (_sliderItems.isEmpty) return;
-
-      final next =
-          (_bottomSliderController.page?.round() ?? 0) + 1;
-
-      _bottomSliderController.animateToPage(
-        next % _sliderItems.length,
-        duration: const Duration(milliseconds: 450),
-        curve: Curves.easeOut,
-      );
-    });
   }
 
   Future<void> _loadInitialData() async {
+    if (_isDisposed) return;
+
     setState(() => _isCheckingAuth = false);
 
     try {
-      final summary =
-          await _homeService.getHomeProfileSummary();
-      final jobsCount =
-          await _homeService.getJobsPostedTodayCount();
+      final summary = await _homeService.getHomeProfileSummary();
+      final jobsCount = await _homeService.getJobsPostedTodayCount();
 
-      _profileName =
-          (summary['profileName'] ?? "").toString();
-      _profileCompletion =
-          (summary['profileCompletion'] ?? 0) as int;
-      _lastUpdatedText =
-          (summary['lastUpdatedText'] ?? "").toString();
-      _missingDetails =
-          (summary['missingDetails'] ?? 0) as int;
+      _profileName = summary['profileName'] ?? "Your Profile";
+      _profileCompletion = summary['profileCompletion'] ?? 0;
+      _lastUpdatedText = summary['lastUpdatedText'] ?? "Updated recently";
+      _missingDetails = summary['missingDetails'] ?? 0;
       _jobsPostedToday = jobsCount;
 
       _expectedSalaryPerMonth =
           await _homeService.getExpectedSalaryPerMonth();
 
-      _savedJobIds =
-          await _homeService.getUserSavedJobs();
-
-      _premiumJobs =
-          await _homeService.fetchPremiumJobs(limit: 8);
-
+      _savedJobIds = await _homeService.getUserSavedJobs();
+      _premiumJobs = await _homeService.fetchPremiumJobs(limit: 8);
       _recommendedJobs =
           await _homeService.getRecommendedJobs(limit: 40);
-
       _latestJobs =
           await _homeService.fetchLatestJobs(limit: 40);
-
       _nearbyJobs =
           await _homeService.fetchJobsNearby(limit: 40);
-
       _topCompanies =
           await _homeService.fetchTopCompanies(limit: 10);
 
       _unreadNotifications =
           await _homeService.getUnreadNotificationsCount();
 
-      // Load slider images from DB table: slider
-      final sliders = await _supabase
-          .from('slider')
-          .select('*')
-          .eq('is_active', true)
-          .order('sort_order', ascending: true);
-
-      _sliderItems =
-          List<Map<String, dynamic>>.from(sliders);
-
+      await _loadSliderImages();
     } finally {
       if (!_isDisposed) {
         setState(() {
@@ -214,71 +157,119 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
     }
   }
 
-  void _redirectToStart() {
-    Navigator.pushNamedAndRemoveUntil(
-      context,
-      AppRoutes.roleSelection,
-      (_) => false,
-    );
+  Future<void> _loadSliderImages() async {
+    final data = await _supabase
+        .from('slider')
+        .select()
+        .eq('is_active', true)
+        .order('display_order', ascending: true);
+
+    _sliderItems = List<Map<String, dynamic>>.from(data);
+    if (!_isDisposed) setState(() {});
+    _startSliderAutoScroll();
   }
 
-  // ------------------------------------------------------------
-  // TOP BAR
-  // ------------------------------------------------------------
+  void _startSliderAutoScroll() {
+    _sliderTimer?.cancel();
+    if (_sliderItems.isEmpty) return;
+
+    _sliderTimer =
+        Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!_sliderController.hasClients) return;
+
+      _currentSliderIndex =
+          (_currentSliderIndex + 1) % _sliderItems.length;
+
+      _sliderController.animateToPage(
+        _currentSliderIndex,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  void _redirectToStart() {
+    if (!mounted) return;
+    Navigator.pushNamedAndRemoveUntil(
+        context, AppRoutes.roleSelection, (_) => false);
+  }
+
   Widget _buildTopBar(BuildContext scaffoldContext) {
     return Container(
-      padding:
-          const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(
-            bottom:
-                BorderSide(color: KhilonjiyaUI.border)),
+        border:
+            Border(bottom: BorderSide(color: KhilonjiyaUI.border)),
       ),
       child: Row(
         children: [
           InkWell(
             onTap: () =>
-                Scaffold.of(scaffoldContext)
-                    .openDrawer(),
-            borderRadius:
-                BorderRadius.circular(999),
+                Scaffold.of(scaffoldContext).openDrawer(),
+            borderRadius: BorderRadius.circular(999),
             child: const Padding(
               padding: EdgeInsets.all(10),
-              child:
-                  Icon(Icons.menu, size: 22),
+              child: Icon(Icons.menu, size: 22),
             ),
           ),
-          const Spacer(),
+          const SizedBox(width: 10),
+          Expanded(
+            child: InkWell(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) =>
+                          const JobSearchPage()),
+                );
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius:
+                      BorderRadius.circular(999),
+                  border: Border.all(
+                      color: KhilonjiyaUI.border),
+                ),
+                child: Row(
+                  children: const [
+                    Icon(Icons.search,
+                        size: 18,
+                        color: Color(0xFF64748B)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
 
-          // PREMIUM ICON
+          // SUBSCRIPTION ICON
           InkWell(
             onTap: () {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) =>
-                      const SubscriptionPage(),
-                ),
+                    builder: (_) =>
+                        const SubscriptionPage()),
               );
             },
-            borderRadius:
-                BorderRadius.circular(999),
             child: Container(
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color:
-                    const Color(0xFFEFF6FF),
+                color: const Color(0xFFEFF6FF),
                 borderRadius:
                     BorderRadius.circular(999),
+                border: Border.all(
+                    color: const Color(0xFFDBEAFE)),
               ),
               child: const Icon(
-                Icons
-                    .auto_awesome_outlined,
+                Icons.auto_awesome_outlined,
                 size: 20,
-                color:
-                    KhilonjiyaUI.primary,
+                color: KhilonjiyaUI.primary,
               ),
             ),
           ),
@@ -287,49 +278,48 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
 
           // NOTIFICATIONS
           InkWell(
-            onTap: () {
-              Navigator.push(
+            onTap: () async {
+              await Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) =>
-                      const NotificationsPage(),
-                ),
+                    builder: (_) =>
+                        const NotificationsPage()),
               );
+
+              _unreadNotifications =
+                  await _homeService
+                      .getUnreadNotificationsCount();
+              if (!_isDisposed) setState(() {});
             },
-            borderRadius:
-                BorderRadius.circular(999),
             child: Stack(
               children: [
                 Container(
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
+                    color: Colors.white,
                     borderRadius:
-                        BorderRadius.circular(
-                            999),
+                        BorderRadius.circular(999),
                     border: Border.all(
-                        color:
-                            KhilonjiyaUI
-                                .border),
+                        color: KhilonjiyaUI.border),
                   ),
                   child: const Icon(
-                      Icons
-                          .notifications_none_outlined),
+                    Icons.notifications_none_outlined,
+                    size: 22,
+                    color: Color(0xFF334155),
+                  ),
                 ),
-                if (_unreadNotifications >
-                    0)
+                if (_unreadNotifications > 0)
                   Positioned(
-                    right: 6,
-                    top: 6,
+                    right: 9,
+                    top: 9,
                     child: Container(
-                      width: 8,
-                      height: 8,
+                      width: 9,
+                      height: 9,
                       decoration:
                           const BoxDecoration(
-                        color:
-                            Color(0xFFEF4444),
-                        shape:
-                            BoxShape.circle,
+                        color: Color(0xFFEF4444),
+                        shape: BoxShape.circle,
                       ),
                     ),
                   ),
@@ -341,117 +331,86 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
     );
   }
 
-  // ------------------------------------------------------------
-  // SLIDER
-  // ------------------------------------------------------------
-  Widget _buildBottomSlider() {
-    if (_sliderItems.isEmpty)
-      return const SizedBox();
+  Widget _buildSlider() {
+    if (_sliderItems.isEmpty) return const SizedBox();
 
-    return SizedBox(
-      height: 120,
-      child: PageView.builder(
-        controller:
-            _bottomSliderController,
-        itemCount:
-            _sliderItems.length,
-        itemBuilder: (_, i) {
-          final item =
-              _sliderItems[i];
-          final image =
-              (item['image_url'] ?? '')
-                  .toString();
-
-          return Container(
-            margin: const EdgeInsets
-                .only(right: 12),
-            decoration: BoxDecoration(
-              borderRadius:
-                  BorderRadius.circular(
-                      18),
-              border: Border.all(
-                  color:
-                      KhilonjiyaUI
-                          .border),
-            ),
-            clipBehavior:
-                Clip.antiAlias,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Image.network(
-                  image,
-                  fit: BoxFit.cover,
+    return Column(
+      children: [
+        const SizedBox(height: 18),
+        SizedBox(
+          height: 110,
+          child: PageView.builder(
+            controller: _sliderController,
+            itemCount: _sliderItems.length,
+            itemBuilder: (_, i) {
+              final imageUrl =
+                  _sliderItems[i]['image_url'] ?? '';
+              return Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius:
+                        BorderRadius.circular(16),
+                    border: Border.all(
+                        color: KhilonjiyaUI.border),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Image.network(
+                    imageUrl,
+                    fit: BoxFit.cover,
+                  ),
                 ),
-                Container(
-                  color: Colors.white
-                      .withOpacity(
-                          0.18),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
-  // ------------------------------------------------------------
-  // BUILD
-  // ------------------------------------------------------------
+  Widget _buildHomeFeed() {
+    return ListView(
+      padding:
+          const EdgeInsets.fromLTRB(16, 16, 16, 120),
+      children: [
+        AIBannerCard(
+            onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) =>
+                        const RecommendedJobsPage()))),
+
+        // YOUR EXISTING SECTIONS REMAIN UNCHANGED ABOVE
+
+        _buildSlider(),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isCheckingAuth) {
       return const Scaffold(
-        body: Center(
-            child:
-                CircularProgressIndicator()),
+        body:
+            Center(child: CircularProgressIndicator()),
       );
     }
 
     return Scaffold(
-      backgroundColor:
-          KhilonjiyaUI.bg,
+      backgroundColor: KhilonjiyaUI.bg,
       drawer: NaukriDrawer(
         userName: _profileName,
-        profileCompletion:
-            _profileCompletion,
-        onClose: () =>
-            Navigator.pop(context),
+        profileCompletion: _profileCompletion,
+        onClose: () => Navigator.pop(context),
       ),
       body: SafeArea(
         child: Column(
           children: [
             Builder(
-                builder:
-                    (scaffoldContext) =>
-                        _buildTopBar(
-                            scaffoldContext)),
-            Expanded(
-              child: ListView(
-                padding:
-                    const EdgeInsets
-                        .fromLTRB(
-                            16,
-                            16,
-                            16,
-                            120),
-                children: [
-                  const SizedBox(
-                      height: 20),
-
-                  // YOUR EXISTING SECTIONS REMAIN AS THEY WERE
-
-                  const SizedBox(
-                      height: 20),
-
-                  _buildBottomSlider(),
-
-                  const SizedBox(
-                      height: 40),
-                ],
-              ),
-            ),
+                builder: (context) =>
+                    _buildTopBar(context)),
+            Expanded(child: _buildHomeFeed()),
           ],
         ),
       ),
