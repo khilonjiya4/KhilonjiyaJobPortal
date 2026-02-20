@@ -32,6 +32,7 @@ import '../presentation/company/dashboard/create_organization_screen.dart';
 import '../presentation/company/jobs/create_job_screen.dart';
 import '../presentation/company/jobs/employer_job_list_screen.dart';
 import '../presentation/company/jobs/job_applicants_screen.dart';
+import '../presentation/company/jobs/job_applicants_pipeline_page.dart';
 import '../presentation/company/notifications/employer_notifications_page.dart';
 
 class AppRoutes {
@@ -65,6 +66,7 @@ class AppRoutes {
   static const String employerJobs = '/employer-jobs';
   static const String createJob = '/create-job';
   static const String jobApplicants = '/job-applicants';
+  static const String jobApplicantsPipeline = '/job-applicants-pipeline';
   static const String employerNotifications = '/employer-notifications';
 
   static final Map<String, WidgetBuilder> routes = {
@@ -106,6 +108,19 @@ class AppRoutes {
 
       return MaterialPageRoute(
         builder: (_) => JobApplicantsScreen(
+          jobId: jobId,
+          companyId: companyId,
+        ),
+      );
+    }
+
+    if (settings.name == jobApplicantsPipeline) {
+      final args = settings.arguments as Map?;
+      final jobId = args?['jobId']?.toString() ?? '';
+      final companyId = args?['companyId']?.toString() ?? '';
+
+      return MaterialPageRoute(
+        builder: (_) => JobApplicantsPipelinePage(
           jobId: jobId,
           companyId: companyId,
         ),
