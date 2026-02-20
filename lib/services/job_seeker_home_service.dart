@@ -1774,21 +1774,76 @@ Future<List<Map<String, dynamic>>> fetchCompanyJobs({
   // TOP COMPANIES
   // ============================================================
 
-  Future<List<Map<String, dynamic>>> fetchTopCompanies({
-    int limit = 8,
-  }) async {
-    _ensureAuthenticatedSync();
+  // ============================================================
+// TOP COMPANIES (PRODUCTION VERSION - REAL JOB COUNT)
+// ============================================================
 
-    final res = await _db
-        .from('companies_with_stats')
-        .select(
-          'id, name, slug, logo_url, industry, company_size, is_verified, total_jobs',
+Future<List<Map<String, dynamic>>> fetchTopCompanies({
+  int limit = 8,
+}) async {
+  _ensureAuthenticatedSync();
+
+  final nowIso = DateTime.now().toIso8601String();
+
+  final res = await _db
+      .from('companies')
+      .select('''
+        id,
+        name,
+        slug,
+        logo_url,
+        industry,
+        company_size,
+        is_verified,
+        headquarters_city,
+        headquarters_state,
+
+        business_type_id,
+        business_types_master (
+          id,
+          type_name,
+          logo_url
+        ),
+
+        job_listings!left (
+          id,
+          status,
+          expires_at
         )
-        .order('total_jobs', ascending: false)
-        .limit(limit);
+      ''')
+      .order('created_at', ascending: false)
+      .limit(200); // fetch larger pool for sorting
 
-    return List<Map<String, dynamic>>.from(res);
+  final companies = List<Map<String, dynamic>>.from(res);
+
+  for (final c in companies) {
+    final jobs = (c['job_listings'] as List?) ?? [];
+
+    final activeJobs = jobs.where((j) {
+      final status = (j['status'] ?? '').toString();
+      final expiresAt = (j['expires_at'] ?? '').toString();
+
+      if (status != 'active') return false;
+      if (expiresAt.isEmpty) return true;
+
+      return expiresAt.compareTo(nowIso) >= 0;
+    }).length;
+
+    c['total_jobs'] = activeJobs;
+
+    // remove raw jobs list (not needed by UI)
+    c.remove('job_listings');
   }
+
+  // sort by dynamic job count
+  companies.sort((a, b) {
+    final ta = (a['total_jobs'] ?? 0) as int;
+    final tb = (b['total_jobs'] ?? 0) as int;
+    return tb.compareTo(ta);
+  });
+
+  return companies.take(limit).toList();
+}
 
   // ============================================================
   // NOTIFICATIONS
