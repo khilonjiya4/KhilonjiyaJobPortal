@@ -22,7 +22,8 @@ class ContactSupportPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final email = AppLinks.supportEmail.trim();
+    // Forced email
+    final email = "support@khilonjiya.com";
     final phone = AppLinks.supportPhone.trim();
     final whatsapp = AppLinks.supportWhatsapp.trim();
     final supportUrl = AppLinks.contactSupportUrl.trim();
@@ -52,13 +53,12 @@ class ContactSupportPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
 
-                if (email.isNotEmpty)
-                  _actionTile(
-                    icon: Icons.email_outlined,
-                    title: "Email",
-                    value: email,
-                    onTap: () => _launch("mailto:$email"),
-                  ),
+                _actionTile(
+                  icon: Icons.email_outlined,
+                  title: "Email",
+                  value: email,
+                  onTap: () => _launch("mailto:$email"),
+                ),
 
                 if (phone.isNotEmpty)
                   _actionTile(
@@ -83,32 +83,20 @@ class ContactSupportPage extends StatelessWidget {
                     value: supportUrl,
                     onTap: () => _launch(supportUrl),
                   ),
-
-                if (email.isEmpty &&
-                    phone.isEmpty &&
-                    whatsapp.isEmpty &&
-                    supportUrl.isEmpty)
-                  Text(
-                    "Support contact details not configured yet.",
-                    style: KhilonjiyaUI.sub.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
               ],
             ),
           ),
 
           // ------------------------------------------------------------
-          // ADDRESS CARD
+          // HELPLINE NUMBER CARD
           // ------------------------------------------------------------
           _card(
-            title: "Business address",
-            child: Text(
-              """
-${AppLinks.companyName}
-(You can add full registered address later)
-""".trim(),
-              style: KhilonjiyaUI.body,
+            title: "Helpline Number",
+            child: _actionTile(
+              icon: Icons.support_agent_outlined,
+              title: "Customer Helpline",
+              value: "+916003170583",
+              onTap: () => _launch("tel:+916003170583"),
             ),
           ),
         ],
