@@ -2,8 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../../core/ui/khilonjiya_ui.dart';
-import '../../../services/search_service.dart';
+import '../../core/ui/khilonjiya_ui.dart';
+import '../../services/search_service.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({Key? key}) : super(key: key);
