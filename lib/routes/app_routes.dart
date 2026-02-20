@@ -26,57 +26,47 @@ import '../presentation/home_marketplace_feed/support/contact_support_page.dart'
 import '../presentation/home_marketplace_feed/settings/notifications_settings_page.dart';
 import '../presentation/home_marketplace_feed/settings/language_settings_page.dart';
 
-class AppRoutes {
-  // ------------------------------------------------------------
-  // CORE
-  // ------------------------------------------------------------
-  static const String initial = '/';
+// EMPLOYER (KEPT FOR COMPILATION)
+import '../presentation/company/dashboard/company_dashboard.dart';
+import '../presentation/company/dashboard/create_organization_screen.dart';
+import '../presentation/company/jobs/create_job_screen.dart';
+import '../presentation/company/jobs/employer_job_list_screen.dart';
+import '../presentation/company/jobs/job_applicants_screen.dart';
+import '../presentation/company/notifications/employer_notifications_page.dart';
 
-  // ------------------------------------------------------------
-  // ROLE SELECTION
-  // ------------------------------------------------------------
+class AppRoutes {
+  static const String initial = '/';
   static const String roleSelection = '/role-selection';
 
-  // ------------------------------------------------------------
-  // AUTH
-  // ------------------------------------------------------------
   static const String jobSeekerLogin = '/job-seeker-login';
   static const String employerLogin = '/employer-login';
 
-  // ------------------------------------------------------------
-  // POST LOGIN
-  // ------------------------------------------------------------
   static const String home = '/home';
   static const String jobSeekerHome = '/job-seeker-home';
 
-  // ------------------------------------------------------------
-  // JOB SEEKER
-  // ------------------------------------------------------------
   static const String profileEdit = '/profile-edit';
 
-  // ------------------------------------------------------------
-  // SETTINGS
-  // ------------------------------------------------------------
   static const String settings = '/settings';
   static const String notificationsSettings = '/settings-notifications';
   static const String languageSettings = '/settings-language';
 
-  // ------------------------------------------------------------
-  // LEGAL
-  // ------------------------------------------------------------
   static const String privacyPolicy = '/privacy-policy';
   static const String termsAndConditions = '/terms-and-conditions';
   static const String refundPolicy = '/refund-policy';
 
-  // ------------------------------------------------------------
-  // ABOUT + SUPPORT
-  // ------------------------------------------------------------
   static const String aboutApp = '/about';
   static const String contactSupport = '/contact-support';
 
   // ------------------------------------------------------------
-  // ROUTES MAP (NO ARG ROUTES)
+  // EMPLOYER ROUTES (RESTORED FOR BUILD)
   // ------------------------------------------------------------
+  static const String companyDashboard = '/company-dashboard';
+  static const String createOrganization = '/create-organization';
+  static const String employerJobs = '/employer-jobs';
+  static const String createJob = '/create-job';
+  static const String jobApplicants = '/job-applicants';
+  static const String employerNotifications = '/employer-notifications';
+
   static final Map<String, WidgetBuilder> routes = {
     initial: (_) => const RoleSelectionScreen(),
     roleSelection: (_) => const RoleSelectionScreen(),
@@ -89,46 +79,45 @@ class AppRoutes {
 
     profileEdit: (_) => const ProfileEditPage(),
 
-    // settings root
     settings: (_) => const SettingsPage(),
-
-    // settings children
     notificationsSettings: (_) => const NotificationsSettingsPage(),
     languageSettings: (_) => const LanguageSettingsPage(),
 
-    // legal
     privacyPolicy: (_) => const PrivacyPolicyPage(),
     termsAndConditions: (_) => const TermsAndConditionsPage(),
     refundPolicy: (_) => const RefundPolicyPage(),
 
-    // about + support
     aboutApp: (_) => const AboutAppPage(),
     contactSupport: (_) => const ContactSupportPage(),
+
+    // EMPLOYER (kept but not linked from UI)
+    companyDashboard: (_) => const CompanyDashboard(),
+    createOrganization: (_) => const CreateOrganizationScreen(),
+    employerJobs: (_) => const EmployerJobListScreen(),
+    createJob: (_) => const CreateJobScreen(),
+    employerNotifications: (_) => const EmployerNotificationsPage(),
   };
 
-  // ------------------------------------------------------------
-  // onGenerateRoute (NO EMPLOYER CASES)
-  // ------------------------------------------------------------
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
+    if (settings.name == jobApplicants) {
+      final args = settings.arguments as Map?;
+      final jobId = args?['jobId']?.toString() ?? '';
+      final companyId = args?['companyId']?.toString();
+
+      return MaterialPageRoute(
+        builder: (_) => JobApplicantsScreen(
+          jobId: jobId,
+          companyId: companyId,
+        ),
+      );
+    }
+
     return MaterialPageRoute(
       builder: (_) => Scaffold(
         body: Center(
           child: Text("Route not found: ${settings.name}"),
         ),
       ),
-    );
-  }
-
-  // ------------------------------------------------------------
-  // HELPERS
-  // ------------------------------------------------------------
-  static Future<void> pushAndClearStack(
-    BuildContext context,
-    String routeName,
-  ) async {
-    await Navigator.of(context).pushNamedAndRemoveUntil(
-      routeName,
-      (_) => false,
     );
   }
 
@@ -141,33 +130,5 @@ class AppRoutes {
       routeName,
       arguments: arguments,
     );
-  }
-
-  static Future<void> pushReplacementNamed(
-    BuildContext context,
-    String routeName, {
-    Object? arguments,
-  }) async {
-    await Navigator.of(context).pushReplacementNamed(
-      routeName,
-      arguments: arguments,
-    );
-  }
-
-  static void pop(BuildContext context, [dynamic result]) {
-    Navigator.of(context).pop(result);
-  }
-
-  static bool canPop(BuildContext context) {
-    return Navigator.of(context).canPop();
-  }
-
-  static T? getArguments<T>(BuildContext context) {
-    final args = ModalRoute.of(context)?.settings.arguments;
-    return args is T ? args : null;
-  }
-
-  static String? getCurrentRouteName(BuildContext context) {
-    return ModalRoute.of(context)?.settings.name;
   }
 }
