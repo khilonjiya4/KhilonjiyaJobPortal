@@ -6,7 +6,7 @@ import '../../core/ui/khilonjiya_ui.dart';
 import '../../services/job_seeker_home_service.dart';
 
 import '../common/widgets/cards/company_card.dart';
-import '../company_details_page.dart'; // ✅ make sure this file exists
+import 'company_details_page.dart'; // ✅ make sure this file exists
 
 class TopCompaniesPage extends StatefulWidget {
   const TopCompaniesPage({Key? key}) : super(key: key);
