@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 class KhilonjiyaUI {
-  // ================= COLORS =================
   static const Color bg = Color(0xFFF7F8FA);
   static const Color card = Colors.white;
   static const Color border = Color(0xFFE5E7EB);
@@ -9,12 +8,9 @@ class KhilonjiyaUI {
   static const Color muted = Color(0xFF6B7280);
   static const Color primary = Color(0xFF2563EB);
 
-  // ================= RADIUS =================
   static BorderRadius r12 = BorderRadius.circular(12);
   static BorderRadius r16 = BorderRadius.circular(16);
   static BorderRadius r20 = BorderRadius.circular(20);
-
-  // ================= TEXT STYLES (SLIM NAUKRI STYLE) =================
 
   static const TextStyle h1 = TextStyle(
     fontSize: 20,
@@ -65,7 +61,28 @@ class KhilonjiyaUI {
     height: 1.2,
   );
 
-  // ================= CARD DECORATION =================
+  // Required for job_card_widget
+
+  static const TextStyle company = TextStyle(
+    fontSize: 13.5,
+    fontWeight: FontWeight.w500,
+    color: muted,
+    height: 1.2,
+  );
+
+  static BoxDecoration tagDecoration() {
+    return BoxDecoration(
+      color: const Color(0xFFF1F5F9),
+      borderRadius: BorderRadius.circular(6),
+    );
+  }
+
+  static const TextStyle tagTextStyle = TextStyle(
+    fontSize: 11.5,
+    fontWeight: FontWeight.w500,
+    color: Color(0xFF334155),
+  );
+
   static BoxDecoration cardDecoration({
     double? radius,
     bool shadow = false,
@@ -86,7 +103,6 @@ class KhilonjiyaUI {
     );
   }
 
-  // ================= THEME =================
   static ThemeData theme() {
     return ThemeData(
       useMaterial3: true,
