@@ -75,6 +75,17 @@ class SearchService {
     });
   }
 
+  Future<List<String>> getDistricts() async {
+  final res = await _db
+      .from('assam_district_master')
+      .select('district_name')
+      .order('district_name', ascending: true);
+
+  return res
+      .map<String>((e) => e['district_name'].toString())
+      .toList();
+}
+
   // =========================================================
   // GET USER RECENT SEARCHES
   // =========================================================
