@@ -1,130 +1,447 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dart:async';
+import 'package:flutter/material.dart';
 
-class SearchService {
-  final SupabaseClient _db = Supabase.instance.client;
+import '../../core/ui/khilonjiya_ui.dart';
+import '../../services/search_service.dart';
 
-  // =========================================================
-  // SEARCH JOBS (Paginated + Filters)
-  // =========================================================
+class SearchPage extends StatefulWidget {
+  const SearchPage({Key? key}) : super(key: key);
 
-  Future<List<Map<String, dynamic>>> searchJobs({
-    required String query,
-    int page = 0,
-    String? district,
-    String? jobType,
-    int? minSalary,
-  }) async {
-    final int pageSize = 20;
-
-    var builder = _db
-        .from('job_listings')
-        .select('''
-          id,
-          job_title,
-          district,
-          salary_min,
-          salary_max,
-          work_mode,
-          employment_type,
-          created_at,
-          companies (
-            id,
-            name,
-            logo_url,
-            is_verified
-          )
-        ''')
-        .eq('status', 'active');
-
-    // Full text search
-    if (query.trim().isNotEmpty) {
-      builder = builder.textSearch('search_vector', query);
-    }
-
-    // Filters
-    if (district != null && district.isNotEmpty) {
-      builder = builder.eq('district', district);
-    }
-
-    if (jobType != null && jobType.isNotEmpty) {
-      builder = builder.eq('employment_type', jobType);
-    }
-
-    if (minSalary != null && minSalary > 0) {
-      builder = builder.gte('salary_max', minSalary);
-    }
-
-    final res = await builder
-        .order('created_at', ascending: false)
-        .range(page * pageSize, (page + 1) * pageSize - 1);
-
-    return List<Map<String, dynamic>>.from(res);
-  }
-
-  // =========================================================
-  // SAVE USER SEARCH HISTORY
-  // =========================================================
-
-  Future<void> saveUserSearch(String keyword) async {
-    final user = _db.auth.currentUser;
-    if (user == null) return;
-
-    await _db.from('user_search_history').insert({
-      'user_id': user.id,
-      'keyword': keyword,
-    });
-  }
-
-  Future<List<String>> getDistricts() async {
-  final res = await _db
-      .from('assam_district_master')
-      .select('district_name')
-      .order('district_name', ascending: true);
-
-  return res
-      .map<String>((e) => e['district_name'].toString())
-      .toList();
+  @override
+  State<SearchPage> createState() => _SearchPageState();
 }
 
-  // =========================================================
-  // GET USER RECENT SEARCHES
-  // =========================================================
+class _SearchPageState extends State<SearchPage> {
+  final SearchService _service = SearchService();
+  final TextEditingController _controller = TextEditingController();
+  final ScrollController _scroll = ScrollController();
 
-  Future<List<String>> getRecentSearches() async {
-    final user = _db.auth.currentUser;
-    if (user == null) return [];
+  Timer? _debounce;
 
-    final res = await _db
-        .from('user_search_history')
-        .select('keyword')
-        .eq('user_id', user.id)
-        .order('searched_at', ascending: false)
-        .limit(6);
+  bool _loading = false;
+  bool _loadingMore = false;
+  bool _hasMore = true;
 
-    return res.map<String>((e) => e['keyword'].toString()).toSet().toList();
+  int _page = 0;
+
+  List<Map<String, dynamic>> _results = [];
+  List<String> _recent = [];
+  List<String> _trending = [];
+  List<String> _districts = [];
+
+  String _currentQuery = '';
+
+  String? _selectedDistrict;
+  String? _selectedJobType;
+  int? _selectedMinSalary;
+
+  @override
+  void initState() {
+    super.initState();
+    _initialize();
+    _scroll.addListener(_scrollListener);
   }
 
-  // =========================================================
-  // GET TRENDING SEARCHES
-  // =========================================================
-
-  Future<List<String>> getTrendingSearches() async {
-    final res = await _db
-        .from('search_trends')
-        .select('keyword')
-        .order('search_count', ascending: false)
-        .limit(6);
-
-    return res.map<String>((e) => e['keyword'].toString()).toList();
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _controller.dispose();
+    _scroll.dispose();
+    super.dispose();
   }
 
-  // =========================================================
-  // INCREMENT TREND COUNTER
-  // =========================================================
+  Future<void> _initialize() async {
+    _recent = await _service.getRecentSearches();
+    _trending = await _service.getTrendingSearches();
+    _districts = await _service.getDistricts();
+    if (!mounted) return;
+    setState(() {});
+  }
 
-  Future<void> incrementTrend(String keyword) async {
-    await _db.rpc('increment_search_trend', params: {
-      'p_keyword': keyword,
+  void _scrollListener() {
+    if (_scroll.position.pixels >=
+            _scroll.position.maxScrollExtent - 200 &&
+        !_loadingMore &&
+        _hasMore &&
+        _currentQuery.isNotEmpty) {
+      _loadMore();
+    }
+  }
+
+  void _onChanged(String value) {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce =
+        Timer(const Duration(milliseconds: 400), () {
+      _startSearch(value.trim());
     });
+  }
+
+  Future<void> _startSearch(String query) async {
+    _currentQuery = query;
+    _page = 0;
+    _hasMore = true;
+    _results.clear();
+
+    if (query.isEmpty) {
+      setState(() {});
+      return;
+    }
+
+    setState(() => _loading = true);
+
+    final res = await _service.searchJobs(
+      query: query,
+      page: 0,
+      district: _selectedDistrict,
+      jobType: _selectedJobType,
+      minSalary: _selectedMinSalary,
+    );
+
+    _results = res;
+    _hasMore = res.length == 20;
+
+    await _service.saveUserSearch(query);
+    await _service.incrementTrend(query);
+
+    if (!mounted) return;
+    setState(() => _loading = false);
+  }
+
+  Future<void> _loadMore() async {
+    _loadingMore = true;
+    _page++;
+
+    final res = await _service.searchJobs(
+      query: _currentQuery,
+      page: _page,
+      district: _selectedDistrict,
+      jobType: _selectedJobType,
+      minSalary: _selectedMinSalary,
+    );
+
+    if (res.isEmpty) {
+      _hasMore = false;
+    } else {
+      _results.addAll(res);
+    }
+
+    if (!mounted) return;
+    setState(() => _loadingMore = false);
+  }
+
+  void _openFilters() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) {
+        String? district = _selectedDistrict;
+        String? jobType = _selectedJobType;
+        int? salary = _selectedMinSalary;
+
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Filters",
+                    style: KhilonjiyaUI.body.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  DropdownButtonFormField<String>(
+                    value: district,
+                    decoration:
+                        const InputDecoration(labelText: "District"),
+                    items: _districts
+                        .map(
+                          (d) => DropdownMenuItem(
+                            value: d,
+                            child: Text(d),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) =>
+                        setModalState(() => district = v),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  DropdownButtonFormField<String>(
+                    value: jobType,
+                    decoration:
+                        const InputDecoration(labelText: "Job Type"),
+                    items: const [
+                      DropdownMenuItem(
+                          value: "Full-time",
+                          child: Text("Full-time")),
+                      DropdownMenuItem(
+                          value: "Part-time",
+                          child: Text("Part-time")),
+                      DropdownMenuItem(
+                          value: "Internship",
+                          child: Text("Internship")),
+                      DropdownMenuItem(
+                          value: "Contract",
+                          child: Text("Contract")),
+                    ],
+                    onChanged: (v) =>
+                        setModalState(() => jobType = v),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  Text("Minimum Salary"),
+                  Slider(
+                    value: (salary ?? 0).toDouble(),
+                    min: 0,
+                    max: 100000,
+                    divisions: 20,
+                    label: salary?.toString(),
+                    onChanged: (v) =>
+                        setModalState(() => salary = v.toInt()),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          _selectedDistrict = district;
+                          _selectedJobType = jobType;
+                          _selectedMinSalary = salary;
+                        });
+                        Navigator.pop(context);
+                        if (_currentQuery.isNotEmpty) {
+                          _startSearch(_currentQuery);
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: KhilonjiyaUI.primary,
+                        elevation: 0,
+                      ),
+                      child: const Text("Apply Filters"),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  String _salaryFormat(int min, int max) {
+    if (min <= 0 && max <= 0) return "Salary not disclosed";
+    return "₹$min - ₹$max";
+  }
+
+  Widget _jobCard(Map<String, dynamic> job) {
+    final company = job['companies'] ?? {};
+    final verified = company['is_verified'] == true;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: KhilonjiyaUI.cardDecoration(radius: 22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            job['job_title'] ?? '',
+            style: KhilonjiyaUI.body.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  company['name'] ?? '',
+                  style: KhilonjiyaUI.sub.copyWith(
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              if (verified)
+                const Icon(
+                  Icons.verified_rounded,
+                  size: 18,
+                  color: Color(0xFF16A34A),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "${job['district'] ?? ''} • ${_salaryFormat(job['salary_min'] ?? 0, job['salary_max'] ?? 0)}",
+            style: KhilonjiyaUI.sub,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _chips(String title, List<String> items) {
+    if (items.isEmpty) return const SizedBox();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: KhilonjiyaUI.body.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: items
+              .map(
+                (e) => GestureDetector(
+                  onTap: () {
+                    _controller.text = e;
+                    _startSearch(e);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(999),
+                      border:
+                          Border.all(color: KhilonjiyaUI.border),
+                    ),
+                    child: Text(
+                      e,
+                      style: KhilonjiyaUI.body.copyWith(
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
+        ),
+        const SizedBox(height: 22),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: KhilonjiyaUI.bg,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              padding:
+                  const EdgeInsets.fromLTRB(12, 8, 12, 8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border(
+                  bottom:
+                      BorderSide(color: KhilonjiyaUI.border),
+                ),
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: () =>
+                        Navigator.pop(context),
+                    icon: const Icon(
+                        Icons.arrow_back_rounded),
+                  ),
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      autofocus: true,
+                      onChanged: _onChanged,
+                      decoration: InputDecoration(
+                        hintText:
+                            "Search jobs, companies, skills...",
+                        hintStyle:
+                            KhilonjiyaUI.sub,
+                        filled: true,
+                        fillColor:
+                            const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(
+                          borderRadius:
+                              BorderRadius.circular(
+                                  18),
+                          borderSide: BorderSide(
+                              color:
+                                  KhilonjiyaUI.border),
+                        ),
+                        contentPadding:
+                            const EdgeInsets.symmetric(
+                                horizontal: 14),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon:
+                        const Icon(Icons.tune_rounded),
+                    onPressed: _openFilters,
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: _loading
+                  ? const Center(
+                      child:
+                          CircularProgressIndicator())
+                  : _currentQuery.isEmpty
+                      ? ListView(
+                          padding:
+                              const EdgeInsets.all(16),
+                          children: [
+                            _chips(
+                                "Recent Searches",
+                                _recent),
+                            _chips("Trending",
+                                _trending),
+                          ],
+                        )
+                      : ListView.builder(
+                          controller: _scroll,
+                          padding:
+                              const EdgeInsets.all(16),
+                          itemCount: _results.length +
+                              (_loadingMore ? 1 : 0),
+                          itemBuilder: (_, i) {
+                            if (i >= _results.length) {
+                              return const Padding(
+                                padding:
+                                    EdgeInsets.all(16),
+                                child: Center(
+                                  child:
+                                      CircularProgressIndicator(),
+                                ),
+                              );
+                            }
+                            return _jobCard(
+                                _results[i]);
+                          },
+                        ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
