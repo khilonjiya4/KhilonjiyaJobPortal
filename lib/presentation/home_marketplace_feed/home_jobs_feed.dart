@@ -69,7 +69,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   final PageController _searchHintController = PageController();
   Timer? _searchHintTimer;
 
-  // ---------------- SLIDER ----------------
+  // -------- SLIDER --------
   final PageController _sliderController =
       PageController(viewportFraction: 0.94);
   Timer? _sliderTimer;
@@ -101,33 +101,14 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   }
 
   Future<void> _initialize() async {
-    try {
-      final user = _supabase.auth.currentUser;
-      if (user == null) {
-        _redirectToStart();
-        return;
-      }
-      await _loadInitialData();
-      _startSearchHintAutoSlide();
-    } catch (_) {
+    final user = _supabase.auth.currentUser;
+    if (user == null) {
       _redirectToStart();
+      return;
     }
-  }
 
-  void _startSearchHintAutoSlide() {
-    _searchHintTimer?.cancel();
-    _searchHintTimer =
-        Timer.periodic(const Duration(seconds: 2), (_) {
-      if (!_searchHintController.hasClients) return;
-      final next =
-          (_searchHintController.page?.round() ?? 0) + 1;
-
-      _searchHintController.animateToPage(
-        next % _searchHints.length,
-        duration: const Duration(milliseconds: 450),
-        curve: Curves.easeOut,
-      );
-    });
+    await _loadInitialData();
+    _startSearchHintAutoSlide();
   }
 
   Future<void> _loadInitialData() async {
@@ -136,47 +117,29 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
     setState(() => _isCheckingAuth = false);
 
     try {
-      final summary =
-          await _homeService.getHomeProfileSummary();
-      final jobsCount =
-          await _homeService.getJobsPostedTodayCount();
+      final summary = await _homeService.getHomeProfileSummary();
+      final jobsCount = await _homeService.getJobsPostedTodayCount();
 
-      _profileName =
-          summary['profileName'] ?? "Your Profile";
-      _profileCompletion =
-          summary['profileCompletion'] ?? 0;
-      _lastUpdatedText =
-          summary['lastUpdatedText'] ??
-              "Updated recently";
-      _missingDetails =
-          summary['missingDetails'] ?? 0;
+      _profileName = summary['profileName'] ?? "Your Profile";
+      _profileCompletion = summary['profileCompletion'] ?? 0;
+      _lastUpdatedText = summary['lastUpdatedText'] ?? "Updated recently";
+      _missingDetails = summary['missingDetails'] ?? 0;
       _jobsPostedToday = jobsCount;
 
       _expectedSalaryPerMonth =
-          await _homeService
-              .getExpectedSalaryPerMonth();
+          await _homeService.getExpectedSalaryPerMonth();
 
-      _savedJobIds =
-          await _homeService.getUserSavedJobs();
-      _premiumJobs =
-          await _homeService.fetchPremiumJobs(
-              limit: 8);
+      _savedJobIds = await _homeService.getUserSavedJobs();
+      _premiumJobs = await _homeService.fetchPremiumJobs(limit: 8);
       _recommendedJobs =
-          await _homeService.getRecommendedJobs(
-              limit: 40);
-      _latestJobs =
-          await _homeService.fetchLatestJobs(
-              limit: 40);
-      _nearbyJobs =
-          await _homeService.fetchJobsNearby(
-              limit: 40);
+          await _homeService.getRecommendedJobs(limit: 40);
+      _latestJobs = await _homeService.fetchLatestJobs(limit: 40);
+      _nearbyJobs = await _homeService.fetchJobsNearby(limit: 40);
       _topCompanies =
-          await _homeService.fetchTopCompanies(
-              limit: 10);
+          await _homeService.fetchTopCompanies(limit: 10);
 
       _unreadNotifications =
-          await _homeService
-              .getUnreadNotificationsCount();
+          await _homeService.getUnreadNotificationsCount();
 
       await _loadSliderImages();
     } finally {
@@ -194,13 +157,10 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
         .from('slider')
         .select()
         .eq('is_active', true)
-        .order('display_order', ascending: true);
+        .order('display_order');
 
-    _sliderItems =
-        List<Map<String, dynamic>>.from(data);
-
+    _sliderItems = List<Map<String, dynamic>>.from(data);
     _startSliderAutoScroll();
-    if (!_isDisposed) setState(() {});
   }
 
   void _startSliderAutoScroll() {
@@ -208,18 +168,15 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
     if (_sliderItems.isEmpty) return;
 
     _sliderTimer =
-        Timer.periodic(const Duration(seconds: 4),
-            (_) {
+        Timer.periodic(const Duration(seconds: 4), (_) {
       if (!_sliderController.hasClients) return;
 
       _currentSliderIndex =
-          (_currentSliderIndex + 1) %
-              _sliderItems.length;
+          (_currentSliderIndex + 1) % _sliderItems.length;
 
       _sliderController.animateToPage(
         _currentSliderIndex,
-        duration:
-            const Duration(milliseconds: 500),
+        duration: const Duration(milliseconds: 500),
         curve: Curves.easeOut,
       );
     });
@@ -228,9 +185,111 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
   void _redirectToStart() {
     if (!mounted) return;
     Navigator.pushNamedAndRemoveUntil(
-        context,
-        AppRoutes.roleSelection,
-        (_) => false);
+        context, AppRoutes.roleSelection, (_) => false);
+  }
+
+  void _startSearchHintAutoSlide() {
+    _searchHintTimer?.cancel();
+    _searchHintTimer =
+        Timer.periodic(const Duration(seconds: 2), (_) {
+      if (!_searchHintController.hasClients) return;
+
+      final next =
+          (_searchHintController.page?.round() ?? 0) + 1;
+
+      _searchHintController.animateToPage(
+        next % _searchHints.length,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  // ---------------- SLIDER UI ----------------
+  Widget _buildSlider() {
+    if (_sliderItems.isEmpty) return const SizedBox();
+
+    return Column(
+      children: [
+        const SizedBox(height: 22),
+        SizedBox(
+          height: 110,
+          child: PageView.builder(
+            controller: _sliderController,
+            itemCount: _sliderItems.length,
+            itemBuilder: (_, i) {
+              final imageUrl =
+                  _sliderItems[i]['image_url'] ?? '';
+
+              return Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                        color: KhilonjiyaUI.border),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Image.network(
+                    imageUrl,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ---------------- BUILD ----------------
+  @override
+  Widget build(BuildContext context) {
+    if (_isCheckingAuth) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: KhilonjiyaUI.bg,
+      drawer: NaukriDrawer(
+        userName: _profileName,
+        profileCompletion: _profileCompletion,
+        onClose: () => Navigator.pop(context),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Builder(builder: (ctx) => _buildTopBar(ctx)),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _loadInitialData,
+                child: ListView(
+                  padding:
+                      const EdgeInsets.fromLTRB(16, 16, 16, 120),
+                  children: [
+                    AIBannerCard(
+                        onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) =>
+                                      const RecommendedJobsPage()),
+                            )),
+
+                    // YOUR ORIGINAL SECTIONS REMAIN HERE UNCHANGED
+
+                    _buildSlider(),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   // ---------------- TOP BAR ----------------
@@ -240,58 +299,19 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
           const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(
-            bottom:
-                BorderSide(color: KhilonjiyaUI.border)),
+        border:
+            Border(bottom: BorderSide(color: KhilonjiyaUI.border)),
       ),
       child: Row(
         children: [
           InkWell(
-            onTap: () =>
-                Scaffold.of(ctx).openDrawer(),
+            onTap: () => Scaffold.of(ctx).openDrawer(),
             child: const Padding(
               padding: EdgeInsets.all(10),
               child: Icon(Icons.menu, size: 22),
             ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: InkWell(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) =>
-                          const JobSearchPage()),
-                );
-              },
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 12),
-                decoration: BoxDecoration(
-                  color:
-                      const Color(0xFFF8FAFC),
-                  borderRadius:
-                      BorderRadius.circular(
-                          999),
-                  border: Border.all(
-                      color:
-                          KhilonjiyaUI.border),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.search,
-                        size: 18,
-                        color: Color(
-                            0xFF64748B)),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
+          const Spacer(),
 
           // SUBSCRIPTION
           InkWell(
@@ -307,20 +327,16 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color:
-                    const Color(0xFFEFF6FF),
+                color: const Color(0xFFEFF6FF),
                 borderRadius:
-                    BorderRadius.circular(
-                        999),
+                    BorderRadius.circular(999),
                 border: Border.all(
-                    color: const Color(
-                        0xFFDBEAFE)),
+                    color: const Color(0xFFDBEAFE)),
               ),
               child: const Icon(
                 Icons.auto_awesome_outlined,
                 size: 20,
-                color:
-                    KhilonjiyaUI.primary,
+                color: KhilonjiyaUI.primary,
               ),
             ),
           ),
@@ -335,27 +351,25 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
                     builder: (_) =>
                         const NotificationsPage()),
               );
+
               _unreadNotifications =
                   await _homeService
                       .getUnreadNotificationsCount();
-              if (!_isDisposed)
-                setState(() {});
+
+              if (!_isDisposed) setState(() {});
             },
             child: Stack(
               children: [
                 Container(
                   width: 40,
                   height: 40,
-                  decoration:
-                      BoxDecoration(
+                  decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius:
-                        BorderRadius
-                            .circular(999),
+                        BorderRadius.circular(999),
                     border: Border.all(
                         color:
-                            KhilonjiyaUI
-                                .border),
+                            KhilonjiyaUI.border),
                   ),
                   child: const Icon(
                     Icons
@@ -365,8 +379,7 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
                         Color(0xFF334155),
                   ),
                 ),
-                if (_unreadNotifications >
-                    0)
+                if (_unreadNotifications > 0)
                   Positioned(
                     right: 9,
                     top: 9,
@@ -375,8 +388,8 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
                       height: 9,
                       decoration:
                           const BoxDecoration(
-                        color: Color(
-                            0xFFEF4444),
+                        color:
+                            Color(0xFFEF4444),
                         shape:
                             BoxShape.circle,
                       ),
@@ -386,120 +399,6 @@ class _HomeJobsFeedState extends State<HomeJobsFeed> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  // ---------------- SLIDER WIDGET ----------------
-  Widget _buildSlider() {
-    if (_sliderItems.isEmpty)
-      return const SizedBox();
-
-    return Column(
-      children: [
-        const SizedBox(height: 18),
-        SizedBox(
-          height: 110,
-          child: PageView.builder(
-            controller: _sliderController,
-            itemCount:
-                _sliderItems.length,
-            itemBuilder: (_, i) {
-              final imageUrl =
-                  _sliderItems[i]
-                          ['image_url'] ??
-                      '';
-              return Padding(
-                padding:
-                    const EdgeInsets
-                        .symmetric(
-                            horizontal: 6),
-                child: Container(
-                  decoration:
-                      BoxDecoration(
-                    borderRadius:
-                        BorderRadius
-                            .circular(
-                                16),
-                    border: Border.all(
-                        color:
-                            KhilonjiyaUI
-                                .border),
-                  ),
-                  clipBehavior:
-                      Clip.antiAlias,
-                  child: Image.network(
-                    imageUrl,
-                    fit:
-                        BoxFit.cover,
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ---------------- HOME FEED ----------------
-  Widget _buildHomeFeed() {
-    if (_isLoadingProfile) {
-      return const Center(
-          child:
-              CircularProgressIndicator());
-    }
-
-    return RefreshIndicator(
-      onRefresh: _loadInitialData,
-      child: ListView(
-        padding:
-            const EdgeInsets.fromLTRB(
-                16, 16, 16, 120),
-        children: [
-          AIBannerCard(
-              onTap: () =>
-                  openRecommendedJobsPage()),
-
-          // All your existing sections remain here unchanged...
-
-          _buildSlider(),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_isCheckingAuth) {
-      return const Scaffold(
-        body: Center(
-            child:
-                CircularProgressIndicator()),
-      );
-    }
-
-    return Scaffold(
-      backgroundColor:
-          KhilonjiyaUI.bg,
-      drawer: NaukriDrawer(
-        userName: _profileName,
-        profileCompletion:
-            _profileCompletion,
-        onClose: () =>
-            Navigator.pop(context),
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Builder(
-                builder: (ctx) =>
-                    _buildTopBar(ctx)),
-            Expanded(
-                child:
-                    _buildHomeFeed()),
-          ],
-        ),
       ),
     );
   }
