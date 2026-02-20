@@ -146,6 +146,8 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
     final description =
         (c['description'] ?? '').toString().trim();
 
+    final isVerified = (c['is_verified'] ?? false) == true;
+
     final rating = _toDouble(c['rating']);
     final totalJobs = _toInt(c['total_jobs']);
 
@@ -156,9 +158,26 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
         elevation: 0,
         iconTheme:
             const IconThemeData(color: Color(0xFF0F172A)),
-        title: Text(
-          name,
-          style: KhilonjiyaUI.cardTitle,
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: KhilonjiyaUI.cardTitle,
+              ),
+            ),
+            if (isVerified)
+              const Padding(
+                padding: EdgeInsets.only(left: 6),
+                child: Icon(
+                  Icons.verified_rounded,
+                  size: 20,
+                  color: Color(0xFF2563EB),
+                ),
+              ),
+          ],
         ),
       ),
       body: RefreshIndicator(
@@ -167,7 +186,6 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
           padding:
               const EdgeInsets.fromLTRB(16, 16, 16, 120),
           children: [
-            // ================= HEADER (Slim like Job Card)
             Container(
               padding: const EdgeInsets.all(12),
               decoration: KhilonjiyaUI.cardDecoration(),
@@ -186,13 +204,30 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
                       crossAxisAlignment:
                           CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          name,
-                          maxLines: 1,
-                          overflow:
-                              TextOverflow.ellipsis,
-                          style:
-                              KhilonjiyaUI.cardTitle,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                name,
+                                maxLines: 1,
+                                overflow:
+                                    TextOverflow.ellipsis,
+                                style:
+                                    KhilonjiyaUI.cardTitle,
+                              ),
+                            ),
+                            if (isVerified)
+                              const Padding(
+                                padding:
+                                    EdgeInsets.only(left: 6),
+                                child: Icon(
+                                  Icons.verified_rounded,
+                                  size: 18,
+                                  color:
+                                      Color(0xFF2563EB),
+                                ),
+                              ),
+                          ],
                         ),
                         const SizedBox(height: 4),
                         Text(
@@ -237,7 +272,6 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
 
             const SizedBox(height: 14),
 
-            // ================= ABOUT (Slim)
             Container(
               padding: const EdgeInsets.all(12),
               decoration: KhilonjiyaUI.cardDecoration(),
@@ -366,9 +400,8 @@ class _CompanyLogoSquare extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final letter = name.isNotEmpty
-        ? name[0].toUpperCase()
-        : "C";
+    final letter =
+        name.isNotEmpty ? name[0].toUpperCase() : "C";
 
     return Container(
       width: size,
