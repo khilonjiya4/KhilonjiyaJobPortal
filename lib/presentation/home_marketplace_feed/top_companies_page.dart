@@ -6,7 +6,7 @@ import '../../core/ui/khilonjiya_ui.dart';
 import '../../services/job_seeker_home_service.dart';
 
 import '../common/widgets/cards/company_card.dart';
-import 'company_details_page.dart'; // ✅ make sure this file exists
+import 'company_details_page.dart';
 
 class TopCompaniesPage extends StatefulWidget {
   const TopCompaniesPage({Key? key}) : super(key: key);
@@ -17,7 +17,6 @@ class TopCompaniesPage extends StatefulWidget {
 
 class _TopCompaniesPageState extends State<TopCompaniesPage> {
   final JobSeekerHomeService _service = JobSeekerHomeService();
-
   final TextEditingController _searchCtrl = TextEditingController();
 
   bool _loading = true;
@@ -42,8 +41,9 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
   }
 
   // ============================================================
-  // LOAD REAL DATA
+  // LOAD
   // ============================================================
+
   Future<void> _load() async {
     if (!_disposed) setState(() => _loading = true);
 
@@ -62,8 +62,9 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
   }
 
   // ============================================================
-  // SEARCH (REAL FILTER)
+  // SEARCH
   // ============================================================
+
   void _applySearch() {
     final q = _searchCtrl.text.trim().toLowerCase();
 
@@ -74,149 +75,42 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
       return;
     }
 
-    final out = _companies.where((c) {
-      final name =
-          (c['name'] ?? '').toString().toLowerCase();
+    final result = _companies.where((c) {
+      final name = (c['name'] ?? '').toString().toLowerCase();
+      final industry = (c['industry'] ?? '').toString().toLowerCase();
+      final city =
+          (c['headquarters_city'] ?? '').toString().toLowerCase();
+      final state =
+          (c['headquarters_state'] ?? '').toString().toLowerCase();
 
-      final industry =
-          (c['industry'] ?? '').toString().toLowerCase();
+      final business =
+          c['business_types_master'] as Map<String, dynamic>?;
 
-      return name.contains(q) || industry.contains(q);
+      final businessType =
+          (business?['type_name'] ?? '').toString().toLowerCase();
+
+      return name.contains(q) ||
+          industry.contains(q) ||
+          businessType.contains(q) ||
+          city.contains(q) ||
+          state.contains(q);
     }).toList();
 
-    if (!_disposed) {
-      setState(() => _filtered = out);
-    }
+    if (!_disposed) setState(() => _filtered = result);
   }
 
   // ============================================================
-  // NAVIGATE TO COMPANY DETAILS
+  // NAVIGATION
   // ============================================================
+
   Future<void> _openCompany(Map<String, dynamic> company) async {
-    final companyId = (company['id'] ?? '').toString().trim();
+    final companyId = (company['id'] ?? '').toString();
     if (companyId.isEmpty) return;
 
-    await Navigator.of(context).push(
+    await Navigator.push(
+      context,
       MaterialPageRoute(
-        builder: (_) => CompanyDetailsPage(
-          companyId: companyId,
-        ),
-      ),
-    );
-  }
-
-  // ============================================================
-  // SEARCH BAR
-  // ============================================================
-  Widget _searchBar() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(
-          bottom: BorderSide(color: KhilonjiyaUI.border),
-        ),
-      ),
-      child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFC),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: KhilonjiyaUI.border),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.search,
-                size: 18, color: Color(0xFF64748B)),
-            const SizedBox(width: 10),
-            Expanded(
-              child: TextField(
-                controller: _searchCtrl,
-                style: KhilonjiyaUI.body.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-                decoration: InputDecoration(
-                  hintText: "Search companies",
-                  hintStyle: KhilonjiyaUI.sub.copyWith(
-                    color: const Color(0xFF94A3B8),
-                  ),
-                  isDense: true,
-                  border: InputBorder.none,
-                ),
-              ),
-            ),
-            if (_searchCtrl.text.trim().isNotEmpty)
-              InkWell(
-                onTap: () {
-                  _searchCtrl.clear();
-                  FocusScope.of(context).unfocus();
-                },
-                borderRadius: BorderRadius.circular(999),
-                child: const Padding(
-                  padding: EdgeInsets.all(6),
-                  child: Icon(Icons.close_rounded, size: 18),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ============================================================
-  // EMPTY STATE
-  // ============================================================
-  Widget _empty() {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      children: [
-        Container(
-          decoration: KhilonjiyaUI.cardDecoration(radius: 22),
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            children: [
-              Icon(
-                Icons.apartment_rounded,
-                size: 52,
-                color: Colors.black.withOpacity(0.35),
-              ),
-              const SizedBox(height: 14),
-              Text(
-                "No companies found",
-                style: KhilonjiyaUI.hTitle,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 6),
-              Text(
-                "Try a different search keyword.",
-                style: KhilonjiyaUI.sub,
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ============================================================
-  // COMPANY LIST
-  // ============================================================
-  Widget _list() {
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
-        itemCount: _filtered.length,
-        itemBuilder: (_, i) {
-          final c = _filtered[i];
-
-          return CompanyCard(
-            company: c,
-            onTap: () => _openCompany(c),
-          );
-        },
+        builder: (_) => CompanyDetailsPage(companyId: companyId),
       ),
     );
   }
@@ -224,6 +118,7 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
   // ============================================================
   // BUILD
   // ============================================================
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -231,22 +126,20 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
       body: SafeArea(
         child: Column(
           children: [
+            // HEADER
             Container(
-              padding:
-                  const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
               decoration: BoxDecoration(
                 color: Colors.white,
                 border: Border(
-                  bottom:
-                      BorderSide(color: KhilonjiyaUI.border),
+                  bottom: BorderSide(color: KhilonjiyaUI.border),
                 ),
               ),
               child: Row(
                 children: [
                   IconButton(
                     onPressed: () => Navigator.pop(context),
-                    icon:
-                        const Icon(Icons.arrow_back_rounded),
+                    icon: const Icon(Icons.arrow_back_rounded),
                   ),
                   Expanded(
                     child: Text(
@@ -256,14 +149,29 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
                   ),
                   IconButton(
                     onPressed: _load,
-                    icon:
-                        const Icon(Icons.refresh_rounded),
+                    icon: const Icon(Icons.refresh_rounded),
                   ),
                 ],
               ),
             ),
 
-            _searchBar(),
+            // SEARCH
+            Container(
+              padding:
+                  const EdgeInsets.fromLTRB(16, 10, 16, 12),
+              color: Colors.white,
+              child: TextField(
+                controller: _searchCtrl,
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(Icons.search),
+                  hintText: "Search companies",
+                  border: OutlineInputBorder(
+                    borderRadius:
+                        BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+            ),
 
             Expanded(
               child: _loading
@@ -271,9 +179,30 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
                       child:
                           CircularProgressIndicator(),
                     )
-                  : (_filtered.isEmpty
-                      ? _empty()
-                      : _list()),
+                  : _filtered.isEmpty
+                      ? const Center(
+                          child: Text(
+                            "No companies found",
+                          ),
+                        )
+                      : RefreshIndicator(
+                          onRefresh: _load,
+                          child: ListView.builder(
+                            padding:
+                                const EdgeInsets.fromLTRB(
+                                    16, 16, 16, 120),
+                            itemCount: _filtered.length,
+                            itemBuilder: (_, i) {
+                              final c = _filtered[i];
+
+                              return CompanyCard(
+                                company: c,
+                                onTap: () =>
+                                    _openCompany(c),
+                              );
+                            },
+                          ),
+                        ),
             ),
           ],
         ),
