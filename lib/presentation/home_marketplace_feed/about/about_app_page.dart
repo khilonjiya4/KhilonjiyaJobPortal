@@ -38,17 +38,12 @@ class _AboutAppPageState extends State<AboutAppPage> {
   }
 
   Future<void> _openUrl(String url) async {
-    final u = url.trim();
-    if (u.isEmpty) return;
-
-    final uri = Uri.tryParse(u);
+    final uri = Uri.tryParse(url.trim());
     if (uri == null) return;
 
     try {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } catch (_) {
-      // ignore
-    }
+    } catch (_) {}
   }
 
   @override
@@ -58,15 +53,17 @@ class _AboutAppPageState extends State<AboutAppPage> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        title: const Text("About"),
+        title: Text(
+          "About",
+          style: KhilonjiyaUI.hTitle.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         foregroundColor: const Color(0xFF0F172A),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         children: [
-          _brandCard(),
-          const SizedBox(height: 12),
-
           _card(
             title: "What is Khilonjiya?",
             body:
@@ -81,54 +78,38 @@ class _AboutAppPageState extends State<AboutAppPage> {
           ),
 
           _tile(
-            icon: Icons.public,
-            title: "Website",
-            subtitle: AppLinks.websiteUrl,
-            onTap: () => _openUrl(AppLinks.websiteUrl),
-          ),
-
-          _tile(
             icon: Icons.mail_outline,
             title: "Support Email",
-            subtitle: AppLinks.supportEmail,
-            onTap: () => _openUrl("mailto:${AppLinks.supportEmail}"),
-          ),
-
-          _tile(
-            icon: Icons.shield_outlined,
-            title: "Privacy Policy",
-            subtitle: AppLinks.privacyPolicyUrl,
-            onTap: () => _openUrl(AppLinks.privacyPolicyUrl),
-          ),
-
-          _tile(
-            icon: Icons.description_outlined,
-            title: "Terms & Conditions",
-            subtitle: AppLinks.termsUrl,
-            onTap: () => _openUrl(AppLinks.termsUrl),
-          ),
-
-          _tile(
-            icon: Icons.currency_rupee_rounded,
-            title: "Refund & Cancellation Policy",
-            subtitle: AppLinks.refundPolicyUrl,
-            onTap: () => _openUrl(AppLinks.refundPolicyUrl),
+            subtitle: "support@khilonjiya.com",
+            onTap: () => _openUrl("mailto:support@khilonjiya.com"),
           ),
 
           const SizedBox(height: 12),
 
           Container(
-            padding: const EdgeInsets.all(14),
-            decoration: KhilonjiyaUI.cardDecoration(radius: 18),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            decoration: KhilonjiyaUI.cardDecoration(radius: 20),
             child: Row(
               children: [
-                const Icon(Icons.info_outline, color: Color(0xFF475569)),
-                const SizedBox(width: 10),
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: KhilonjiyaUI.primary.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(
+                    Icons.info_outline,
+                    size: 20,
+                    color: KhilonjiyaUI.primary,
+                  ),
+                ),
+                const SizedBox(width: 14),
                 Expanded(
                   child: Text(
                     "App Version: $_versionText",
                     style: KhilonjiyaUI.body.copyWith(
-                      fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
@@ -142,69 +123,31 @@ class _AboutAppPageState extends State<AboutAppPage> {
     );
   }
 
-  Widget _brandCard() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: KhilonjiyaUI.cardDecoration(radius: 18),
-      child: Row(
-        children: [
-          Container(
-            width: 54,
-            height: 54,
-            decoration: BoxDecoration(
-              color: const Color(0xFFF1F5F9),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: KhilonjiyaUI.border),
-            ),
-            child: const Icon(
-              Icons.work_outline_rounded,
-              color: KhilonjiyaUI.primary,
-              size: 26,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  "Khilonjiya",
-                  style: KhilonjiyaUI.hTitle.copyWith(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  AppLinks.companyName,
-                  style: KhilonjiyaUI.sub.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _card({
     required String title,
     required String body,
   }) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: KhilonjiyaUI.cardDecoration(radius: 18),
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      decoration: KhilonjiyaUI.cardDecoration(radius: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: KhilonjiyaUI.hTitle.copyWith(fontSize: 14.8)),
+          Text(
+            title,
+            style: KhilonjiyaUI.body.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 8),
           Text(
             body.trim(),
-            style: KhilonjiyaUI.body.copyWith(height: 1.35),
+            style: KhilonjiyaUI.sub.copyWith(
+              height: 1.4,
+              fontWeight: FontWeight.w400,
+              color: const Color(0xFF475569),
+            ),
           ),
         ],
       ),
@@ -217,23 +160,29 @@ class _AboutAppPageState extends State<AboutAppPage> {
     required String subtitle,
     required VoidCallback onTap,
   }) {
-    final sub = subtitle.trim();
-
     return InkWell(
-      onTap: sub.isEmpty ? null : onTap,
-      borderRadius: KhilonjiyaUI.r16,
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: KhilonjiyaUI.r16,
-          border: Border.all(color: KhilonjiyaUI.border),
-        ),
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        decoration: KhilonjiyaUI.cardDecoration(radius: 20),
         child: Row(
           children: [
-            Icon(icon, color: const Color(0xFF334155)),
-            const SizedBox(width: 12),
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: KhilonjiyaUI.primary.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(
+                icon,
+                size: 20,
+                color: KhilonjiyaUI.primary,
+              ),
+            ),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -241,25 +190,27 @@ class _AboutAppPageState extends State<AboutAppPage> {
                   Text(
                     title,
                     style: KhilonjiyaUI.body.copyWith(
-                      fontWeight: FontWeight.w900,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 4),
                   Text(
-                    sub.isEmpty ? "Not set" : sub,
+                    subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: KhilonjiyaUI.sub.copyWith(
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w500,
+                      color: const Color(0xFF64748B),
                     ),
                   ),
                 ],
               ),
             ),
-            Icon(
-              sub.isEmpty ? Icons.lock_outline : Icons.open_in_new,
+            const SizedBox(width: 8),
+            const Icon(
+              Icons.open_in_new_rounded,
+              size: 18,
               color: KhilonjiyaUI.muted,
-              size: 20,
             ),
           ],
         ),
