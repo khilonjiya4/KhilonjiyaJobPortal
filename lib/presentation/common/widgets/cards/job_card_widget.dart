@@ -24,7 +24,6 @@ class JobCardWidget extends StatelessWidget {
     final title =
         (job['job_title'] ?? job['title'] ?? 'Job').toString().trim();
 
-    // ✅ FIX 1: Proper company name resolution (like horizontal)
     final companyMap = job['companies'];
     final companyName = (companyMap is Map<String, dynamic>)
         ? (companyMap['name'] ?? '').toString().trim()
@@ -55,7 +54,6 @@ class JobCardWidget extends StatelessWidget {
     final companyLogoUrl =
         (job['companies']?['logo_url'] ?? '').toString().trim();
 
-    // ✅ FIX 2: Business icon resolution like horizontal
     String? businessIconUrl;
 
     if (companyMap is Map<String, dynamic>) {
@@ -83,7 +81,6 @@ class JobCardWidget extends StatelessWidget {
         decoration: KhilonjiyaUI.cardDecoration(),
         child: Stack(
           children: [
-            // ✅ FIX 2: Styled business icon (no faded opacity)
             Positioned.fill(
               child: Align(
                 alignment: Alignment.centerRight,
@@ -93,7 +90,6 @@ class JobCardWidget extends StatelessWidget {
                 ),
               ),
             ),
-
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -106,7 +102,6 @@ class JobCardWidget extends StatelessWidget {
                       size: _companyLogoSize,
                     ),
                     const SizedBox(width: 10),
-
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -127,7 +122,6 @@ class JobCardWidget extends StatelessWidget {
                         ],
                       ),
                     ),
-
                     InkWell(
                       onTap: onSaveToggle,
                       child: Padding(
@@ -145,10 +139,7 @@ class JobCardWidget extends StatelessWidget {
                     ),
                   ],
                 ),
-
                 const SizedBox(height: 10),
-
-                // ✅ FIX 3: Icons styled like horizontal
                 _infoRow(Icons.location_on_outlined,
                     const Color(0xFF2563EB), location),
                 const SizedBox(height: 6),
@@ -157,7 +148,6 @@ class JobCardWidget extends StatelessWidget {
                 const SizedBox(height: 6),
                 _infoRow(Icons.currency_rupee_rounded,
                     const Color(0xFF16A34A), salary),
-
                 if (skills.isNotEmpty) ...[
                   const SizedBox(height: 10),
                   Wrap(
@@ -179,9 +169,7 @@ class JobCardWidget extends StatelessWidget {
                         .toList(),
                   ),
                 ],
-
                 const SizedBox(height: 10),
-
                 Text(
                   _postedAgo(postedAt),
                   style: KhilonjiyaUI.sub,
@@ -251,6 +239,67 @@ class JobCardWidget extends StatelessWidget {
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
+  }
+}
+
+class _CompanyLogo extends StatelessWidget {
+  final String name;
+  final String logoUrl;
+  final double size;
+
+  const _CompanyLogo({
+    required this.name,
+    required this.logoUrl,
+    required this.size,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final letter =
+        name.isNotEmpty ? name[0].toUpperCase() : "C";
+
+    final colors = [
+      const Color(0xFFE0F2FE),
+      const Color(0xFFFCE7F3),
+      const Color(0xFFEDE9FE),
+      const Color(0xFFDCFCE7),
+      const Color(0xFFFFEDD5),
+    ];
+
+    final bg = colors[Random().nextInt(colors.length)];
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: logoUrl.isEmpty
+          ? Center(
+              child: Text(
+                letter,
+                style: TextStyle(
+                  fontSize: size * 0.45,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            )
+          : Image.network(
+              logoUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Center(
+                child: Text(
+                  letter,
+                  style: TextStyle(
+                    fontSize: size * 0.45,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+    );
   }
 }
 
