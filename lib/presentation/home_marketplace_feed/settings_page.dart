@@ -15,15 +15,17 @@ class SettingsPage extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        title: const Text("Settings"),
+        title: Text(
+          "Settings",
+          style: KhilonjiyaUI.hTitle.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
         foregroundColor: const Color(0xFF0F172A),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         children: [
-          // ------------------------------------------------------------
-          // NOTIFICATIONS (later)
-          // ------------------------------------------------------------
           _tile(
             context,
             icon: Icons.notifications_outlined,
@@ -34,9 +36,6 @@ class SettingsPage extends StatelessWidget {
             },
           ),
 
-          // ------------------------------------------------------------
-          // PRIVACY + LEGAL
-          // ------------------------------------------------------------
           _tile(
             context,
             icon: Icons.lock_outline,
@@ -67,9 +66,6 @@ class SettingsPage extends StatelessWidget {
             },
           ),
 
-          // ------------------------------------------------------------
-          // LANGUAGE (later)
-          // ------------------------------------------------------------
           _tile(
             context,
             icon: Icons.language_outlined,
@@ -80,9 +76,6 @@ class SettingsPage extends StatelessWidget {
             },
           ),
 
-          // ------------------------------------------------------------
-          // ABOUT
-          // ------------------------------------------------------------
           _tile(
             context,
             icon: Icons.info_outline,
@@ -116,19 +109,27 @@ class SettingsPage extends StatelessWidget {
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: KhilonjiyaUI.r16,
+      borderRadius: BorderRadius.circular(20),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: KhilonjiyaUI.r16,
-          border: Border.all(color: KhilonjiyaUI.border),
-        ),
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        decoration: KhilonjiyaUI.cardDecoration(radius: 20),
         child: Row(
           children: [
-            Icon(icon, color: const Color(0xFF334155)),
-            const SizedBox(width: 12),
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: KhilonjiyaUI.primary.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(
+                icon,
+                size: 20,
+                color: KhilonjiyaUI.primary,
+              ),
+            ),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -136,22 +137,28 @@ class SettingsPage extends StatelessWidget {
                   Text(
                     title,
                     style: KhilonjiyaUI.body.copyWith(
-                      fontWeight: FontWeight.w900,
+                      fontWeight: FontWeight.w600, // lighter but same size
                     ),
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 4),
                   Text(
                     subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: KhilonjiyaUI.sub.copyWith(
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w500,
+                      color: const Color(0xFF64748B),
                     ),
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: KhilonjiyaUI.muted),
+            const SizedBox(width: 8),
+            const Icon(
+              Icons.chevron_right_rounded,
+              size: 20,
+              color: KhilonjiyaUI.muted,
+            ),
           ],
         ),
       ),
