@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import '../../../../core/ui/khilonjiya_ui.dart';
 
@@ -11,42 +12,52 @@ class CompanyCard extends StatelessWidget {
     this.onTap,
   }) : super(key: key);
 
-  static const double _cardHeight = 108; // same feel as job cards
-  static const double _logoSize = _cardHeight * 0.30; // 30% height
+  static const double _cardHeight = 108;
+  static const double _logoSize = _cardHeight * 0.30;
+  static const double _companyLogoSize = 36;
 
   @override
   Widget build(BuildContext context) {
-    // ------------------------------------------------------------
-    // DATA
-    // ------------------------------------------------------------
-    final name = (company['name'] ?? 'Company').toString().trim();
+    // =========================
+    // BASIC DATA
+    // =========================
+    final name = (company['name'] ?? '').toString().trim();
+    final isVerified = (company['is_verified'] ?? false) == true;
+    final totalJobs = _toInt(company['total_jobs']);
+    final headquartersCity =
+        (company['headquarters_city'] ?? '').toString().trim();
 
-    // Option A: companies.business_types_master(type_name, logo_url)
-    final bt = company['business_types_master'];
+    final companyLogoUrl =
+        (company['logo_url'] ?? '').toString().trim();
 
+    // =========================
+    // BUSINESS TYPE (SCHEMA CORRECT)
+    // =========================
     String businessType = '';
-    String? businessIconUrl;
+    String? businessLogoUrl;
+
+    final bt = company['business_types_master'];
 
     if (bt is Map<String, dynamic>) {
       businessType = (bt['type_name'] ?? '').toString().trim();
-
       final url = (bt['logo_url'] ?? '').toString().trim();
-      businessIconUrl = url.isEmpty ? null : url;
+      businessLogoUrl = url.isEmpty ? null : url;
     }
 
-    // fallback
     if (businessType.isEmpty) {
-      businessType = (company['industry'] ?? 'Business').toString().trim();
+      businessType =
+          (company['industry'] ?? '').toString().trim();
     }
+
     if (businessType.isEmpty) businessType = "Business";
 
-    final isVerified = (company['is_verified'] ?? false) == true;
+    // Fallback: if no business logo → use company logo
+    if (businessLogoUrl == null || businessLogoUrl.isEmpty) {
+      if (companyLogoUrl.isNotEmpty) {
+        businessLogoUrl = companyLogoUrl;
+      }
+    }
 
-    final totalJobs = _toInt(company['total_jobs']);
-
-    // ------------------------------------------------------------
-    // UI
-    // ------------------------------------------------------------
     return InkWell(
       onTap: onTap,
       borderRadius: KhilonjiyaUI.r16,
@@ -68,50 +79,56 @@ class CompanyCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // ============================================================
-            // LEFT: TEXT BLOCK
-            // Company Name + Verified
-            // Business Type
-            // Jobs Posted
-            // ============================================================
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // --------------------------------------------------------
-                  // Company name + verified icon
-                  // --------------------------------------------------------
+                  // =========================
+                  // COMPANY LOGO + NAME
+                  // =========================
                   Row(
                     children: [
+                      _CompanyLogo(
+                        name: name,
+                        logoUrl: companyLogoUrl,
+                        size: _companyLogoSize,
+                      ),
+                      const SizedBox(width: 10),
                       Expanded(
-                        child: Text(
-                          name.isEmpty ? "Company" : name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: KhilonjiyaUI.cardTitle.copyWith(
-                            fontSize: 15.6,
-                            fontWeight: FontWeight.w900,
-                            height: 1.05,
-                          ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                name.isEmpty ? "Company" : name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: KhilonjiyaUI.cardTitle.copyWith(
+                                  fontSize: 15.6,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                            if (isVerified)
+                              const Padding(
+                                padding: EdgeInsets.only(left: 6),
+                                child: Icon(
+                                  Icons.verified_rounded,
+                                  size: 18,
+                                  color: Color(0xFF2563EB),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
-                      if (isVerified) ...[
-                        const SizedBox(width: 6),
-                        const Icon(
-                          Icons.verified_rounded,
-                          size: 18,
-                          color: Color(0xFF2563EB),
-                        ),
-                      ],
                     ],
                   ),
 
                   const SizedBox(height: 6),
 
-                  // --------------------------------------------------------
-                  // Business type
-                  // --------------------------------------------------------
+                  // =========================
+                  // BUSINESS TYPE
+                  // =========================
                   Text(
                     businessType,
                     maxLines: 1,
@@ -120,24 +137,41 @@ class CompanyCard extends StatelessWidget {
                       fontSize: 12.8,
                       fontWeight: FontWeight.w800,
                       color: const Color(0xFF64748B),
-                      height: 1.05,
                     ),
                   ),
 
+                  const SizedBox(height: 6),
+
+                  // =========================
+                  // HEADQUARTERS CITY
+                  // =========================
+                  if (headquartersCity.isNotEmpty)
+                    Text(
+                      headquartersCity,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: KhilonjiyaUI.sub.copyWith(
+                        fontSize: 12.2,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFF94A3B8),
+                      ),
+                    ),
+
                   const SizedBox(height: 10),
 
-                  // --------------------------------------------------------
-                  // Jobs posted
-                  // --------------------------------------------------------
+                  // =========================
+                  // TOTAL JOBS
+                  // =========================
                   Text(
-                    "${totalJobs <= 0 ? 0 : totalJobs} jobs posted",
+                    totalJobs <= 0
+                        ? "0 jobs posted"
+                        : "$totalJobs jobs posted",
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: KhilonjiyaUI.sub.copyWith(
                       fontSize: 12.2,
                       fontWeight: FontWeight.w800,
                       color: const Color(0xFF94A3B8),
-                      height: 1.0,
                     ),
                   ),
                 ],
@@ -146,12 +180,12 @@ class CompanyCard extends StatelessWidget {
 
             const SizedBox(width: 14),
 
-            // ============================================================
-            // RIGHT: BUSINESS TYPE LOGO
-            // ============================================================
-            _BusinessTypeIcon(
+            // =========================
+            // RIGHT BUSINESS LOGO
+            // =========================
+            _BusinessTypeLogo(
               businessType: businessType,
-              iconUrl: businessIconUrl,
+              logoUrl: businessLogoUrl,
               size: _logoSize,
             ),
           ],
@@ -160,9 +194,6 @@ class CompanyCard extends StatelessWidget {
     );
   }
 
-  // ============================================================
-  // HELPERS
-  // ============================================================
   int _toInt(dynamic v) {
     if (v == null) return 0;
     if (v is int) return v;
@@ -171,26 +202,82 @@ class CompanyCard extends StatelessWidget {
   }
 }
 
-// ============================================================
-// BUSINESS TYPE ICON (Option A)
-// - Uses business_types_master.logo_url
-// - Else first letter of business type
-// ============================================================
-class _BusinessTypeIcon extends StatelessWidget {
-  final String businessType;
-  final String? iconUrl;
+class _CompanyLogo extends StatelessWidget {
+  final String name;
+  final String logoUrl;
   final double size;
 
-  const _BusinessTypeIcon({
-    required this.businessType,
-    required this.iconUrl,
+  const _CompanyLogo({
+    required this.name,
+    required this.logoUrl,
     required this.size,
   });
 
   @override
   Widget build(BuildContext context) {
-    final t = businessType.trim();
-    final letter = t.isNotEmpty ? t[0].toUpperCase() : "B";
+    final letter =
+        name.isNotEmpty ? name[0].toUpperCase() : "C";
+
+    final colors = [
+      const Color(0xFFE0F2FE),
+      const Color(0xFFFCE7F3),
+      const Color(0xFFEDE9FE),
+      const Color(0xFFDCFCE7),
+      const Color(0xFFFFEDD5),
+    ];
+
+    final bg = colors[Random().nextInt(colors.length)];
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: logoUrl.isEmpty
+          ? Center(
+              child: Text(
+                letter,
+                style: TextStyle(
+                  fontSize: size * 0.45,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            )
+          : Image.network(
+              logoUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Center(
+                child: Text(
+                  letter,
+                  style: TextStyle(
+                    fontSize: size * 0.45,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+    );
+  }
+}
+
+class _BusinessTypeLogo extends StatelessWidget {
+  final String businessType;
+  final String? logoUrl;
+  final double size;
+
+  const _BusinessTypeLogo({
+    required this.businessType,
+    required this.logoUrl,
+    required this.size,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final letter =
+        businessType.isNotEmpty ? businessType[0].toUpperCase() : "B";
 
     return Container(
       width: size,
@@ -201,30 +288,28 @@ class _BusinessTypeIcon extends StatelessWidget {
         border: Border.all(color: KhilonjiyaUI.border),
       ),
       clipBehavior: Clip.antiAlias,
-      child: (iconUrl == null || iconUrl!.trim().isEmpty)
+      child: (logoUrl == null || logoUrl!.isEmpty)
           ? Center(
               child: Text(
                 letter,
                 style: TextStyle(
-                  fontSize: size * 0.50,
+                  fontSize: size * 0.52,
                   fontWeight: FontWeight.w900,
                   color: const Color(0xFF0F172A),
-                  height: 1.0,
                 ),
               ),
             )
           : Image.network(
-              iconUrl!,
+              logoUrl!,
               fit: BoxFit.cover,
               errorBuilder: (_, __, ___) {
                 return Center(
                   child: Text(
                     letter,
                     style: TextStyle(
-                      fontSize: size * 0.50,
+                      fontSize: size * 0.52,
                       fontWeight: FontWeight.w900,
                       color: const Color(0xFF0F172A),
-                      height: 1.0,
                     ),
                   ),
                 );
