@@ -21,9 +21,27 @@ class JobCardWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = (job['job_title'] ?? 'Job').toString().trim();
-    final company = (job['company_name'] ?? 'Company').toString().trim();
-    final location = (job['district'] ?? 'Location').toString().trim();
+    final title =
+        (job['job_title'] ?? job['title'] ?? 'Job').toString().trim();
+
+    // ✅ FIX 1: Proper company name resolution (like horizontal)
+    final companyMap = job['companies'];
+    final companyName = (companyMap is Map<String, dynamic>)
+        ? (companyMap['name'] ?? '').toString().trim()
+        : '';
+
+    final company = companyName.isNotEmpty
+        ? companyName
+        : (job['company_name'] ?? job['company'] ?? 'Company')
+            .toString()
+            .trim();
+
+    final location = (job['district'] ??
+            job['location'] ??
+            job['job_address'] ??
+            'Location')
+        .toString()
+        .trim();
 
     final salary = _salaryText(
       salaryMin: job['salary_min'],
@@ -37,10 +55,22 @@ class JobCardWidget extends StatelessWidget {
     final companyLogoUrl =
         (job['companies']?['logo_url'] ?? '').toString().trim();
 
-    final businessIconUrl =
-        (job['companies']?['business_types_master']?['logo_url'] ?? '')
-            .toString()
-            .trim();
+    // ✅ FIX 2: Business icon resolution like horizontal
+    String? businessIconUrl;
+
+    if (companyMap is Map<String, dynamic>) {
+      final bt = companyMap['business_types_master'];
+
+      if (bt is Map<String, dynamic>) {
+        final url = (bt['logo_url'] ?? '').toString().trim();
+        businessIconUrl = url.isEmpty ? null : url;
+      }
+
+      if (businessIconUrl == null) {
+        final url = (companyMap['logo_url'] ?? '').toString().trim();
+        businessIconUrl = url.isEmpty ? null : url;
+      }
+    }
 
     final skills = _extractSkills(job);
 
@@ -53,11 +83,11 @@ class JobCardWidget extends StatelessWidget {
         decoration: KhilonjiyaUI.cardDecoration(),
         child: Stack(
           children: [
-            // RIGHT CENTER BUSINESS ICON
+            // ✅ FIX 2: Styled business icon (no faded opacity)
             Positioned.fill(
               child: Align(
                 alignment: Alignment.centerRight,
-                child: _BusinessIcon(
+                child: _BusinessTypeIcon(
                   iconUrl: businessIconUrl,
                   size: _businessIconSize,
                 ),
@@ -67,7 +97,6 @@ class JobCardWidget extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // HEADER ROW
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -119,11 +148,15 @@ class JobCardWidget extends StatelessWidget {
 
                 const SizedBox(height: 10),
 
-                _infoRow(Icons.location_on_outlined, location),
+                // ✅ FIX 3: Icons styled like horizontal
+                _infoRow(Icons.location_on_outlined,
+                    const Color(0xFF2563EB), location),
                 const SizedBox(height: 6),
-                _infoRow(Icons.work_outline, exp),
+                _infoRow(Icons.work_outline_rounded,
+                    const Color(0xFF475569), exp),
                 const SizedBox(height: 6),
-                _infoRow(Icons.currency_rupee, salary),
+                _infoRow(Icons.currency_rupee_rounded,
+                    const Color(0xFF16A34A), salary),
 
                 if (skills.isNotEmpty) ...[
                   const SizedBox(height: 10),
@@ -161,10 +194,10 @@ class JobCardWidget extends StatelessWidget {
     );
   }
 
-  Widget _infoRow(IconData icon, String text) {
+  Widget _infoRow(IconData icon, Color iconColor, String text) {
     return Row(
       children: [
-        Icon(icon, size: 16, color: KhilonjiyaUI.muted),
+        Icon(icon, size: 16, color: iconColor),
         const SizedBox(width: 6),
         Expanded(
           child: Text(
@@ -182,6 +215,7 @@ class JobCardWidget extends StatelessWidget {
     int? toInt(v) {
       if (v == null) return null;
       if (v is int) return v;
+      if (v is double) return v.toInt();
       return int.tryParse(v.toString());
     }
 
@@ -189,10 +223,7 @@ class JobCardWidget extends StatelessWidget {
     final mx = toInt(salaryMax);
 
     if (mn == null && mx == null) return "Not disclosed";
-
-    if (mn != null && mx != null) {
-      return "$mn-$mx per month";
-    }
+    if (mn != null && mx != null) return "$mn-$mx per month";
     if (mn != null) return "$mn+ per month";
     return "Up to $mx per month";
   }
@@ -223,95 +254,30 @@ class JobCardWidget extends StatelessWidget {
   }
 }
 
-// ============================================================
-// COMPANY LOGO
-// ============================================================
-
-class _CompanyLogo extends StatelessWidget {
-  final String name;
-  final String logoUrl;
+class _BusinessTypeIcon extends StatelessWidget {
+  final String? iconUrl;
   final double size;
 
-  const _CompanyLogo({
-    required this.name,
-    required this.logoUrl,
-    required this.size,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final letter = name.isNotEmpty ? name[0].toUpperCase() : "C";
-
-    final colors = [
-      const Color(0xFFE0F2FE),
-      const Color(0xFFFCE7F3),
-      const Color(0xFFEDE9FE),
-      const Color(0xFFDCFCE7),
-      const Color(0xFFFFEDD5),
-    ];
-
-    final bg = colors[Random().nextInt(colors.length)];
-
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: logoUrl.isEmpty
-          ? Center(
-              child: Text(
-                letter,
-                style: TextStyle(
-                  fontSize: size * 0.45,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black87,
-                ),
-              ),
-            )
-          : Image.network(
-              logoUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Center(
-                child: Text(
-                  letter,
-                  style: TextStyle(
-                    fontSize: size * 0.45,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-    );
-  }
-}
-
-// ============================================================
-// BUSINESS ICON
-// ============================================================
-
-class _BusinessIcon extends StatelessWidget {
-  final String iconUrl;
-  final double size;
-
-  const _BusinessIcon({
+  const _BusinessTypeIcon({
     required this.iconUrl,
     required this.size,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Opacity(
-      opacity: 0.15,
-      child: iconUrl.isEmpty
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: (iconUrl == null || iconUrl!.isEmpty)
           ? const SizedBox()
           : Image.network(
-              iconUrl,
-              width: size,
-              height: size,
-              fit: BoxFit.contain,
+              iconUrl!,
+              fit: BoxFit.cover,
             ),
     );
   }
