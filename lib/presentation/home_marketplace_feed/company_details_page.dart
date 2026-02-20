@@ -24,12 +24,8 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
   bool _loading = true;
   bool _loadingJobs = true;
 
-  bool _isFollowing = false;
-
   Map<String, dynamic>? _company;
   List<Map<String, dynamic>> _jobs = [];
-
-  // Saved jobs (optional)
   Set<String> _savedJobIds = {};
 
   @override
@@ -45,10 +41,9 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
     });
 
     try {
-      final company = await _service.fetchCompanyDetails(widget.companyId);
-      final follow = await _service.isCompanyFollowed(widget.companyId);
+      final company =
+          await _service.fetchCompanyDetails(widget.companyId);
 
-      // optional saved jobs for job cards
       final saved = await _service.getUserSavedJobs();
 
       final jobs = await _service.fetchCompanyJobs(
@@ -60,13 +55,10 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
 
       setState(() {
         _company = company;
-        _isFollowing = follow;
         _savedJobIds = saved;
         _jobs = jobs;
       });
-    } catch (_) {
-      // ignore
-    } finally {
+    } catch (_) {} finally {
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -75,21 +67,15 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
     }
   }
 
-  Future<void> _toggleFollow() async {
-    try {
-      final newValue = await _service.toggleFollowCompany(widget.companyId);
-      if (!mounted) return;
-      setState(() => _isFollowing = newValue);
-    } catch (_) {}
-  }
-
   Future<void> _toggleSaveJob(String jobId) async {
     try {
       final isSaved = await _service.toggleSaveJob(jobId);
       if (!mounted) return;
 
       setState(() {
-        isSaved ? _savedJobIds.add(jobId) : _savedJobIds.remove(jobId);
+        isSaved
+            ? _savedJobIds.add(jobId)
+            : _savedJobIds.remove(jobId);
       });
     } catch (_) {}
   }
@@ -102,8 +88,10 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
       MaterialPageRoute(
         builder: (_) => JobDetailsPage(
           job: job,
-          isSaved: _savedJobIds.contains(job['id'].toString()),
-          onSaveToggle: () => _toggleSaveJob(job['id'].toString()),
+          isSaved:
+              _savedJobIds.contains(job['id'].toString()),
+          onSaveToggle: () =>
+              _toggleSaveJob(job['id'].toString()),
         ),
       ),
     );
@@ -117,16 +105,12 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
         appBar: AppBar(
           backgroundColor: Colors.white,
           elevation: 0,
-          iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
-          title: Text(
-            "Company",
-            style: KhilonjiyaUI.cardTitle.copyWith(
-              fontSize: 16,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
+          iconTheme:
+              const IconThemeData(color: Color(0xFF0F172A)),
         ),
-        body: const Center(child: CircularProgressIndicator()),
+        body: const Center(
+          child: CircularProgressIndicator(),
+        ),
       );
     }
 
@@ -137,14 +121,8 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
         appBar: AppBar(
           backgroundColor: Colors.white,
           elevation: 0,
-          iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
-          title: Text(
-            "Company",
-            style: KhilonjiyaUI.cardTitle.copyWith(
-              fontSize: 16,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
+          iconTheme:
+              const IconThemeData(color: Color(0xFF0F172A)),
         ),
         body: Center(
           child: Text(
@@ -155,14 +133,18 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
       );
     }
 
-    final name = (c['name'] ?? 'Company').toString().trim();
-    final logoUrl = (c['logo_url'] ?? '').toString().trim();
-    final website = (c['website'] ?? '').toString().trim();
-    final description = (c['description'] ?? '').toString().trim();
-    final industry = (c['industry'] ?? '').toString().trim();
-    final size = (c['company_size'] ?? '').toString().trim();
-
-    final isVerified = c['is_verified'] == true;
+    final name =
+        (c['name'] ?? 'Company').toString().trim();
+    final logoUrl =
+        (c['logo_url'] ?? '').toString().trim();
+    final industry =
+        (c['industry'] ?? '').toString().trim();
+    final size =
+        (c['company_size'] ?? '').toString().trim();
+    final website =
+        (c['website'] ?? '').toString().trim();
+    final description =
+        (c['description'] ?? '').toString().trim();
 
     final rating = _toDouble(c['rating']);
     final totalJobs = _toInt(c['total_jobs']);
@@ -172,88 +154,77 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
+        iconTheme:
+            const IconThemeData(color: Color(0xFF0F172A)),
         title: Text(
-          name.isEmpty ? "Company" : name,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: KhilonjiyaUI.cardTitle.copyWith(
-            fontSize: 16,
-            fontWeight: FontWeight.w900,
-          ),
+          name,
+          style: KhilonjiyaUI.cardTitle,
         ),
       ),
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+          padding:
+              const EdgeInsets.fromLTRB(16, 16, 16, 120),
           children: [
-            // ------------------------------------------------------------
-            // HEADER CARD
-            // ------------------------------------------------------------
+            // ================= HEADER (Slim like Job Card)
             Container(
-              padding: const EdgeInsets.all(16),
-              decoration: KhilonjiyaUI.cardDecoration(radius: 18),
+              padding: const EdgeInsets.all(12),
+              decoration: KhilonjiyaUI.cardDecoration(),
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
                 children: [
                   _CompanyLogoSquare(
                     logoUrl: logoUrl,
                     name: name,
-                    size: 62,
+                    size: 46,
                   ),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                name.isEmpty ? "Company" : name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: KhilonjiyaUI.cardTitle.copyWith(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                            ),
-                            if (isVerified) ...[
-                              const SizedBox(width: 8),
-                              const Icon(
-                                Icons.verified_rounded,
-                                size: 18,
-                                color: KhilonjiyaUI.primary,
-                              ),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 6),
                         Text(
-                          _subtitle(industry: industry, size: size, website: website),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: KhilonjiyaUI.sub.copyWith(
-                            fontSize: 12.4,
-                            height: 1.3,
-                          ),
+                          name,
+                          maxLines: 1,
+                          overflow:
+                              TextOverflow.ellipsis,
+                          style:
+                              KhilonjiyaUI.cardTitle,
                         ),
-                        const SizedBox(height: 12),
-
+                        const SizedBox(height: 4),
+                        Text(
+                          _subtitle(
+                            industry,
+                            size,
+                            website,
+                          ),
+                          maxLines: 1,
+                          overflow:
+                              TextOverflow.ellipsis,
+                          style:
+                              KhilonjiyaUI.company,
+                        ),
+                        const SizedBox(height: 8),
                         Row(
                           children: [
-                            _statPill(
-                              icon: Icons.star_rounded,
-                              text: rating <= 0 ? "New" : rating.toStringAsFixed(1),
-                              iconColor: const Color(0xFFF59E0B),
+                            _infoRow(
+                              Icons.star_rounded,
+                              const Color(0xFFF59E0B),
+                              rating <= 0
+                                  ? "New"
+                                  : rating
+                                      .toStringAsFixed(
+                                          1),
                             ),
-                            const SizedBox(width: 10),
-                            _statPill(
-                              icon: Icons.work_rounded,
-                              text: totalJobs <= 0 ? "0 jobs" : "$totalJobs jobs",
-                              iconColor: const Color(0xFF2563EB),
+                            const SizedBox(width: 12),
+                            _infoRow(
+                              Icons.work_outline_rounded,
+                              const Color(
+                                  0xFF2563EB),
+                              "$totalJobs jobs",
                             ),
                           ],
                         ),
@@ -264,69 +235,28 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
               ),
             ),
 
-            const SizedBox(height: 12),
-
-            // ------------------------------------------------------------
-            // FOLLOW BUTTON
-            // ------------------------------------------------------------
-            Row(
-              children: [
-                Expanded(
-                  child: InkWell(
-                    onTap: _toggleFollow,
-                    borderRadius: BorderRadius.circular(16),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      decoration: BoxDecoration(
-                        color: _isFollowing ? Colors.white : KhilonjiyaUI.primary,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: _isFollowing ? KhilonjiyaUI.border : KhilonjiyaUI.primary,
-                        ),
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        _isFollowing ? "Following" : "Follow",
-                        style: KhilonjiyaUI.body.copyWith(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 13.8,
-                          color: _isFollowing ? const Color(0xFF0F172A) : Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
             const SizedBox(height: 14),
 
-            // ------------------------------------------------------------
-            // ABOUT
-            // ------------------------------------------------------------
+            // ================= ABOUT (Slim)
             Container(
-              padding: const EdgeInsets.all(16),
-              decoration: KhilonjiyaUI.cardDecoration(radius: 18),
+              padding: const EdgeInsets.all(12),
+              decoration: KhilonjiyaUI.cardDecoration(),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
                 children: [
                   Text(
                     "About company",
-                    style: KhilonjiyaUI.cardTitle.copyWith(
-                      fontSize: 14.8,
-                      fontWeight: FontWeight.w900,
-                    ),
+                    style:
+                        KhilonjiyaUI.cardTitle,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   Text(
-                    description.trim().isEmpty
+                    description.isEmpty
                         ? "No description added yet."
                         : description,
-                    style: KhilonjiyaUI.body.copyWith(
-                      fontSize: 13.2,
-                      height: 1.45,
-                      color: const Color(0xFF334155),
-                    ),
+                    style:
+                        KhilonjiyaUI.body,
                   ),
                 ],
               ),
@@ -334,62 +264,40 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
 
             const SizedBox(height: 18),
 
-            // ------------------------------------------------------------
-            // OPEN JOBS
-            // ------------------------------------------------------------
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    "Open jobs",
-                    style: KhilonjiyaUI.cardTitle.copyWith(
-                      fontSize: 15.4,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-                Text(
-                  _jobs.isEmpty ? "" : "${_jobs.length}",
-                  style: KhilonjiyaUI.sub.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: const Color(0xFF64748B),
-                  ),
-                ),
-              ],
+            Text(
+              "Open jobs",
+              style: KhilonjiyaUI.cardTitle,
             ),
-
             const SizedBox(height: 10),
 
             if (_loadingJobs)
-              Container(
-                height: 80,
-                decoration: KhilonjiyaUI.cardDecoration(radius: 18),
-                child: const Center(
-                  child: SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                ),
-              )
+              const Center(
+                  child:
+                      CircularProgressIndicator())
             else if (_jobs.isEmpty)
               Container(
-                padding: const EdgeInsets.all(16),
-                decoration: KhilonjiyaUI.cardDecoration(radius: 18),
+                padding:
+                    const EdgeInsets.all(12),
+                decoration:
+                    KhilonjiyaUI.cardDecoration(),
                 child: Text(
-                  "No active jobs from this company right now.",
-                  style: KhilonjiyaUI.sub,
+                  "No active jobs right now.",
+                  style:
+                      KhilonjiyaUI.sub,
                 ),
               )
             else
               ..._jobs.map((job) {
-                final id = job['id']?.toString() ?? '';
-
+                final id =
+                    job['id']?.toString() ?? '';
                 return JobCardWidget(
                   job: job,
-                  isSaved: _savedJobIds.contains(id),
-                  onSaveToggle: () => _toggleSaveJob(id),
-                  onTap: () => _openJobDetails(job),
+                  isSaved:
+                      _savedJobIds.contains(id),
+                  onSaveToggle: () =>
+                      _toggleSaveJob(id),
+                  onTap: () =>
+                      _openJobDetails(job),
                 );
               }),
           ],
@@ -398,59 +306,42 @@ class _CompanyDetailsPageState extends State<CompanyDetailsPage> {
     );
   }
 
-  // ------------------------------------------------------------
-  // UI HELPERS
-  // ------------------------------------------------------------
-  Widget _statPill({
-    required IconData icon,
-    required String text,
-    required Color iconColor,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: KhilonjiyaUI.border),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: iconColor),
-          const SizedBox(width: 6),
-          Text(
-            text,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: KhilonjiyaUI.sub.copyWith(
-              fontSize: 12.2,
-              fontWeight: FontWeight.w800,
-              color: const Color(0xFF334155),
-            ),
-          ),
-        ],
-      ),
+  Widget _infoRow(
+      IconData icon,
+      Color color,
+      String text) {
+    return Row(
+      children: [
+        Icon(icon,
+            size: 16,
+            color: color),
+        const SizedBox(width: 6),
+        Text(
+          text,
+          style:
+              KhilonjiyaUI.body,
+        ),
+      ],
     );
   }
 
-  String _subtitle({
-    required String industry,
-    required String size,
-    required String website,
-  }) {
+  String _subtitle(
+      String industry,
+      String size,
+      String website) {
     final parts = <String>[];
-
-    if (industry.trim().isNotEmpty) parts.add(industry.trim());
-    if (size.trim().isNotEmpty) parts.add(size.trim());
-    if (website.trim().isNotEmpty) parts.add(website.trim());
-
-    return parts.isEmpty ? "Company profile" : parts.join(" • ");
+    if (industry.isNotEmpty)
+      parts.add(industry);
+    if (size.isNotEmpty)
+      parts.add(size);
+    if (website.isNotEmpty)
+      parts.add(website);
+    return parts.join(" • ");
   }
 
   int _toInt(dynamic v) {
     if (v == null) return 0;
     if (v is int) return v;
-    if (v is double) return v.toInt();
     return int.tryParse(v.toString()) ?? 0;
   }
 
@@ -475,43 +366,32 @@ class _CompanyLogoSquare extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final letter = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : "C";
+    final letter = name.isNotEmpty
+        ? name[0].toUpperCase()
+        : "C";
 
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: KhilonjiyaUI.border),
+        color:
+            const Color(0xFFF1F5F9),
+        borderRadius:
+            BorderRadius.circular(12),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: logoUrl.trim().isEmpty
+      clipBehavior:
+          Clip.antiAlias,
+      child: logoUrl.isEmpty
           ? Center(
               child: Text(
                 letter,
-                style: KhilonjiyaUI.h1.copyWith(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  color: const Color(0xFF334155),
-                ),
+                style:
+                    KhilonjiyaUI.cardTitle,
               ),
             )
           : Image.network(
               logoUrl,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) {
-                return Center(
-                  child: Text(
-                    letter,
-                    style: KhilonjiyaUI.h1.copyWith(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                      color: const Color(0xFF334155),
-                    ),
-                  ),
-                );
-              },
             ),
     );
   }
