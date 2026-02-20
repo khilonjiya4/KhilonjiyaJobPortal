@@ -6,6 +6,7 @@ import '../../core/ui/khilonjiya_ui.dart';
 import '../../services/job_seeker_home_service.dart';
 
 import '../common/widgets/cards/company_card.dart';
+import '../company_details_page.dart'; // ✅ make sure this file exists
 
 class TopCompaniesPage extends StatefulWidget {
   const TopCompaniesPage({Key? key}) : super(key: key);
@@ -41,18 +42,16 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
   }
 
   // ============================================================
-  // LOAD
+  // LOAD REAL DATA
   // ============================================================
   Future<void> _load() async {
     if (!_disposed) setState(() => _loading = true);
 
     try {
-      // IMPORTANT:
-      // This method exists already in your service
       final list = await _service.fetchTopCompanies(limit: 80);
 
-      _companies = list;
-      _filtered = list;
+      _companies = List<Map<String, dynamic>>.from(list);
+      _filtered = List<Map<String, dynamic>>.from(list);
     } catch (_) {
       _companies = [];
       _filtered = [];
@@ -63,43 +62,64 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
   }
 
   // ============================================================
-  // SEARCH
+  // SEARCH (REAL FILTER)
   // ============================================================
   void _applySearch() {
     final q = _searchCtrl.text.trim().toLowerCase();
 
     if (q.isEmpty) {
-      if (!_disposed) setState(() => _filtered = List.from(_companies));
+      if (!_disposed) {
+        setState(() => _filtered = List.from(_companies));
+      }
       return;
     }
 
     final out = _companies.where((c) {
-      final name = (c['name'] ?? '').toString().toLowerCase();
+      final name =
+          (c['name'] ?? '').toString().toLowerCase();
 
-      // Option A business type
-      final bt = c['business_types_master'];
-      final businessType = (bt is Map<String, dynamic>)
-          ? (bt['type_name'] ?? '').toString().toLowerCase()
-          : '';
+      final industry =
+          (c['industry'] ?? '').toString().toLowerCase();
 
-      return name.contains(q) || businessType.contains(q);
+      return name.contains(q) || industry.contains(q);
     }).toList();
 
-    if (!_disposed) setState(() => _filtered = out);
+    if (!_disposed) {
+      setState(() => _filtered = out);
+    }
   }
 
   // ============================================================
-  // UI
+  // NAVIGATE TO COMPANY DETAILS
+  // ============================================================
+  Future<void> _openCompany(Map<String, dynamic> company) async {
+    final companyId = (company['id'] ?? '').toString().trim();
+    if (companyId.isEmpty) return;
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CompanyDetailsPage(
+          companyId: companyId,
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // SEARCH BAR
   // ============================================================
   Widget _searchBar() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(bottom: BorderSide(color: KhilonjiyaUI.border)),
+        border: Border(
+          bottom: BorderSide(color: KhilonjiyaUI.border),
+        ),
       ),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: const Color(0xFFF8FAFC),
           borderRadius: BorderRadius.circular(999),
@@ -107,17 +127,19 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
         ),
         child: Row(
           children: [
-            const Icon(Icons.search, size: 18, color: Color(0xFF64748B)),
+            const Icon(Icons.search,
+                size: 18, color: Color(0xFF64748B)),
             const SizedBox(width: 10),
             Expanded(
               child: TextField(
                 controller: _searchCtrl,
-                style: KhilonjiyaUI.body.copyWith(fontWeight: FontWeight.w800),
+                style: KhilonjiyaUI.body.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
                 decoration: InputDecoration(
                   hintText: "Search companies",
                   hintStyle: KhilonjiyaUI.sub.copyWith(
                     color: const Color(0xFF94A3B8),
-                    fontWeight: FontWeight.w700,
                   ),
                   isDense: true,
                   border: InputBorder.none,
@@ -142,6 +164,9 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
     );
   }
 
+  // ============================================================
+  // EMPTY STATE
+  // ============================================================
   Widget _empty() {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -175,6 +200,9 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
     );
   }
 
+  // ============================================================
+  // COMPANY LIST
+  // ============================================================
   Widget _list() {
     return RefreshIndicator(
       onRefresh: _load,
@@ -186,9 +214,7 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
 
           return CompanyCard(
             company: c,
-            onTap: () {
-              // Later: open company details page
-            },
+            onTap: () => _openCompany(c),
           );
         },
       ),
@@ -205,18 +231,22 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
       body: SafeArea(
         child: Column(
           children: [
-            // TOP BAR
             Container(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              padding:
+                  const EdgeInsets.fromLTRB(12, 10, 12, 10),
               decoration: BoxDecoration(
                 color: Colors.white,
-                border: Border(bottom: BorderSide(color: KhilonjiyaUI.border)),
+                border: Border(
+                  bottom:
+                      BorderSide(color: KhilonjiyaUI.border),
+                ),
               ),
               child: Row(
                 children: [
                   IconButton(
                     onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.arrow_back_rounded),
+                    icon:
+                        const Icon(Icons.arrow_back_rounded),
                   ),
                   Expanded(
                     child: Text(
@@ -226,7 +256,8 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
                   ),
                   IconButton(
                     onPressed: _load,
-                    icon: const Icon(Icons.refresh_rounded),
+                    icon:
+                        const Icon(Icons.refresh_rounded),
                   ),
                 ],
               ),
@@ -236,8 +267,13 @@ class _TopCompaniesPageState extends State<TopCompaniesPage> {
 
             Expanded(
               child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : (_filtered.isEmpty ? _empty() : _list()),
+                  ? const Center(
+                      child:
+                          CircularProgressIndicator(),
+                    )
+                  : (_filtered.isEmpty
+                      ? _empty()
+                      : _list()),
             ),
           ],
         ),
