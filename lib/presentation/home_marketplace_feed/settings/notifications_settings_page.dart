@@ -11,7 +11,8 @@ class NotificationsSettingsPage extends StatefulWidget {
       _NotificationsSettingsPageState();
 }
 
-class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
+class _NotificationsSettingsPageState
+    extends State<NotificationsSettingsPage> {
   final JobSeekerHomeService _service = JobSeekerHomeService();
 
   bool _loading = true;
@@ -31,11 +32,11 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
     try {
       final profile = await _service.fetchMyProfile();
 
-      _notificationEnabled = (profile['notification_enabled'] ?? true) == true;
-      _jobAlertsEnabled = (profile['job_alerts_enabled'] ?? true) == true;
-    } catch (_) {
-      // ignore
-    }
+      _notificationEnabled =
+          (profile['notification_enabled'] ?? true) == true;
+      _jobAlertsEnabled =
+          (profile['job_alerts_enabled'] ?? true) == true;
+    } catch (_) {}
 
     if (!mounted) return;
     setState(() => _loading = false);
@@ -67,43 +68,55 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        title: const Text("Notifications"),
+        title: Text(
+          "Notifications",
+          style: KhilonjiyaUI.hTitle.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         foregroundColor: const Color(0xFF0F172A),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
               children: [
                 _switchTile(
                   title: "App notifications",
                   subtitle: "General app notifications",
                   value: _notificationEnabled,
-                  onChanged: (v) => setState(() => _notificationEnabled = v),
+                  onChanged: (v) =>
+                      setState(() => _notificationEnabled = v),
                 ),
                 _switchTile(
                   title: "Job alerts",
                   subtitle: "Recommended jobs and updates",
                   value: _jobAlertsEnabled,
-                  onChanged: (v) => setState(() => _jobAlertsEnabled = v),
+                  onChanged: (v) =>
+                      setState(() => _jobAlertsEnabled = v),
                 ),
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: _save,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: KhilonjiyaUI.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+
+                const SizedBox(height: 20),
+
+                SizedBox(
+                  height: 40, // smaller button
+                  child: ElevatedButton(
+                    onPressed: _save,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: KhilonjiyaUI.primary,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                    ),
+                    child: Text(
+                      "Save",
+                      style: KhilonjiyaUI.body.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                  child: const Text("Save"),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  "Note: Push notifications will be enabled later when the system is fully integrated.",
-                  style: KhilonjiyaUI.sub,
                 ),
               ],
             ),
@@ -117,22 +130,25 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
     required ValueChanged<bool> onChanged,
   }) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: KhilonjiyaUI.r16,
-        border: Border.all(color: KhilonjiyaUI.border),
-      ),
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      decoration: KhilonjiyaUI.cardDecoration(radius: 20),
       child: SwitchListTile(
+        contentPadding: EdgeInsets.zero,
         value: value,
         onChanged: onChanged,
         title: Text(
           title,
-          style: KhilonjiyaUI.body.copyWith(fontWeight: FontWeight.w900),
+          style: KhilonjiyaUI.body.copyWith(
+            fontWeight: FontWeight.w600, // lighter
+          ),
         ),
         subtitle: Text(
           subtitle,
-          style: KhilonjiyaUI.sub.copyWith(fontWeight: FontWeight.w700),
+          style: KhilonjiyaUI.sub.copyWith(
+            fontWeight: FontWeight.w500,
+            color: const Color(0xFF64748B),
+          ),
         ),
       ),
     );
