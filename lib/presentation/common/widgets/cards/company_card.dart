@@ -12,8 +12,7 @@ class CompanyCard extends StatelessWidget {
     this.onTap,
   }) : super(key: key);
 
-  static const double _cardHeight = 118;
-  static const double _logoSize = _cardHeight * 0.32;
+  static const double _logoSize = 42;
   static const double _companyLogoSize = 38;
 
   @override
@@ -69,9 +68,8 @@ class CompanyCard extends StatelessWidget {
       onTap: onTap,
       borderRadius: KhilonjiyaUI.r16,
       child: Container(
-        height: _cardHeight,
         margin: const EdgeInsets.only(bottom: 14),
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: KhilonjiyaUI.r16,
@@ -85,13 +83,13 @@ class CompanyCard extends StatelessWidget {
           ],
         ),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: Column(
                 crossAxisAlignment:
                     CrossAxisAlignment.start,
-                mainAxisAlignment:
-                    MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   // =========================
                   // LOGO + NAME
@@ -247,148 +245,5 @@ class CompanyCard extends StatelessWidget {
     return location.isNotEmpty
         ? location
         : size;
-  }
-}
-
-// ============================================================
-// COMPANY LOGO (Stable color based on name hash)
-// ============================================================
-
-class _CompanyLogo extends StatelessWidget {
-  final String name;
-  final String logoUrl;
-  final double size;
-
-  const _CompanyLogo({
-    required this.name,
-    required this.logoUrl,
-    required this.size,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final letter =
-        name.isNotEmpty ? name[0].toUpperCase() : "C";
-
-    final colors = [
-      const Color(0xFFE0F2FE),
-      const Color(0xFFFCE7F3),
-      const Color(0xFFEDE9FE),
-      const Color(0xFFDCFCE7),
-      const Color(0xFFFFEDD5),
-    ];
-
-    final index =
-        name.isEmpty ? 0 : name.hashCode % colors.length;
-
-    final bg = colors[index.abs()];
-
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: logoUrl.isEmpty
-          ? Center(
-              child: Text(
-                letter,
-                style: TextStyle(
-                  fontSize: size * 0.45,
-                  fontWeight:
-                      FontWeight.w600,
-                ),
-              ),
-            )
-          : Image.network(
-              logoUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) =>
-                  Center(
-                child: Text(
-                  letter,
-                  style: TextStyle(
-                    fontSize:
-                        size * 0.45,
-                    fontWeight:
-                        FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-    );
-  }
-}
-
-// ============================================================
-// BUSINESS TYPE LOGO
-// ============================================================
-
-class _BusinessTypeLogo extends StatelessWidget {
-  final String businessType;
-  final String? logoUrl;
-  final double size;
-
-  const _BusinessTypeLogo({
-    required this.businessType,
-    required this.logoUrl,
-    required this.size,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final letter =
-        businessType.isNotEmpty
-            ? businessType[0].toUpperCase()
-            : "B";
-
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius:
-            BorderRadius.circular(14),
-        border:
-            Border.all(color: KhilonjiyaUI.border),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: (logoUrl == null ||
-              logoUrl!.isEmpty)
-          ? Center(
-              child: Text(
-                letter,
-                style: TextStyle(
-                  fontSize:
-                      size * 0.52,
-                  fontWeight:
-                      FontWeight.w900,
-                  color: const Color(
-                      0xFF0F172A),
-                ),
-              ),
-            )
-          : Image.network(
-              logoUrl!,
-              fit: BoxFit.cover,
-              errorBuilder:
-                  (_, __, ___) =>
-                      Center(
-                child: Text(
-                  letter,
-                  style: TextStyle(
-                    fontSize:
-                        size * 0.52,
-                    fontWeight:
-                        FontWeight.w900,
-                    color: const Color(
-                        0xFF0F172A),
-                  ),
-                ),
-              ),
-            ),
-    );
   }
 }
